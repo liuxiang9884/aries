@@ -17,3 +17,11 @@ pybind/examples/dump/*
 download/
 third_party/
 .worktrees/
+
+# Research artifacts and large local data/model outputs
+artifacts/
+*.parquet
+*.dump
+*.bin
+*.pt
+*.ckpt
