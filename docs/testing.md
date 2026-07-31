@@ -1,18 +1,36 @@
 # 验证说明
 
-更新时间：2026-07-31T15:42:19+08:00
+更新时间：2026-07-31T17:05:05+08:00
 
 ## 基础检查
 
-当前仓库尚未建立 Python package、CMake 工程、通用数据校验框架、回测
-smoke 或模型训练入口。`tests/test_synology_pull.py` 是当前唯一单元测试入口。
-提交前至少执行：
+当前仓库尚未建立 Python package、converter 业务 target、通用数据校验框架、
+回测 smoke 或模型训练入口。根 CMake 工程已经建立，并通过 CTest 注册现有
+`tests/test_synology_pull.py`。提交前至少执行：
 
 ```bash
 git status --short --branch
 git log --oneline -8
 git diff --check
 ```
+
+## CMake Scaffold 检查
+
+项目使用根 `CMakePresets.json` 和 vcpkg manifest。首次配置会在对应 build
+目录安装 manifest 依赖。当前验证命令为：
+
+```bash
+export VCPKG_ROOT=/home/liuxiang/vcpkg
+
+cmake --preset debug \
+  -DFETCHCONTENT_SOURCE_DIR_NOVA=/home/liuxiang/dev/nova
+cmake --build --preset debug
+ctest --preset debug
+```
+
+`FETCHCONTENT_SOURCE_DIR_NOVA` 只用于本地联调；省略时使用
+`cmake/dependencies.cmake` 固定的 Nova commit。机器专用值可以放在不纳入
+git 的 `CMakeUserPresets.json`。
 
 ## 数据下载脚本检查
 

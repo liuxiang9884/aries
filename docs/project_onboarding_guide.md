@@ -1,13 +1,16 @@
 # Aries 项目接手指南
 
-更新时间：2026-07-31T15:42:19+08:00
+更新时间：2026-07-31T17:05:05+08:00
 
 ## 当前仓库状态
 
 - 仓库路径：`/home/liuxiang/dev/aries`。
-- 当前分支：`main`；本轮提交在本地完成，尚未 push。
 - 当前已提交的顶层模块目录：`data/`、`factors/`、`models/`、`backtest/`、`research/`、`configs/`、`tests/`、`docs/`。
-- `README.md` 仍是最小占位，只包含项目名。
+- 根 `CMakeLists.txt`、`CMakePresets.json` 和 `vcpkg.json` 提供统一的
+  configure、build、CTest 和依赖入口；机器专用路径不写入公共 CMake。
+- `data/converter/` 已建立 `twse/` 与 `taifex/` 目录骨架，头文件与实现文件
+  后续共同放在对应市场目录，不增加语言、`include/` 或 `src/` 层。
+- `README.md` 记录当前构建入口和本地 Nova source override 用法。
 - `scripts/` 提供台湾 raw 数据 NAS 下载入口和使用说明；
   `tests/test_synology_pull.py` 覆盖关键续传与配置边界。
 - 公开仓库不保存 NAS URL、账号或密码；本机 cron 通过环境变量注入 URL 和
@@ -22,7 +25,8 @@
 - 模型训练与推理：label、feature set、训练 / 验证 / 测试切分、模型评估、推理产物和模型注册。
 - 回测模块：信号对齐、持仓生成、成交假设、成本模型、绩效指标和报告。
 
-第一层目录按业务模块划分，不按 Python / C++ 语言划分。后续如需要 C++，建议放在对应模块内部的 `cpp/` 或 native 子目录中，由 Python 入口调用。
+第一层目录按业务模块划分，不按 Python / C++ 语言划分。台湾 dump converter
+统一放在 `data/converter/`，TWSE 和 TAIFEX 按市场划分子目录。
 
 ## 当前数据状态
 
@@ -56,6 +60,11 @@
 git status --short --branch
 git log --oneline -8
 git diff --check
+VCPKG_ROOT=/home/liuxiang/vcpkg \
+  cmake --preset debug \
+  -DFETCHCONTENT_SOURCE_DIR_NOVA=/home/liuxiang/dev/nova
+VCPKG_ROOT=/home/liuxiang/vcpkg cmake --build --preset debug
+VCPKG_ROOT=/home/liuxiang/vcpkg ctest --preset debug
 PYTHONDONTWRITEBYTECODE=1 \
   python3 -m unittest -v tests/test_synology_pull.py
 bash -n scripts/pull-tw-raw
@@ -63,15 +72,15 @@ scripts/pull-tw-raw --help
 scripts/synology-pull --help
 ```
 
-当前没有 Python package、CMake 工程、回测 smoke 或模型训练入口。新增数据、
-因子、模型或回测逻辑时，需要同步建立对应最小测试、fixture、dry-run 或
-smoke。
+当前没有 Python package、converter 业务 target、回测 smoke 或模型训练入口。
+新增数据、因子、模型或回测逻辑时，需要同步建立对应最小测试、fixture、
+dry-run 或 smoke。
 
 ## 下一步建议
 
-- 为 `data/` 模块确定第一批入口：raw 文件发现、dump 解压、dump 转 CSV、
-  manifest 生成和基本质量检查；当前优先把一次性 `orion` scratch config
-  收敛为可参数化、可 dry-run 的转换流程。
+- 在 `data/converter/twse/` 中提取 Orion 的 TWSE BCD protocol、message
+  decoder、dump converter 和 CSV writer，先建立小样本 fixture 和失败测试，
+  再增加 `aries_twse_converter` library 与 CLI target。
 - 明确 `/data/tw/raw`、`/home/liuxiang/data/raw` 和
   `/home/liuxiang/data/csv` 的角色、生命周期与版本规则，再建立第一版
   manifest。
