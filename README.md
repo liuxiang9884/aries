@@ -50,6 +50,6 @@ CSV。当前支持 format 1、6、17、22、23，以及 `stock`、`etf`、
 ```
 
 转换默认拒绝覆盖已有文件；明确传入 `--overwrite` 才允许成功后原子替换。
-schema 与时间语义见 `docs/data.md`，协议核对和 Orion 差异见
-`docs/twse_converter.md`，测试入口见 `docs/testing.md`。TAIFEX converter
-尚未提取。
+schema 与时间语义见 `data/docs/data.md`，协议核对和 Orion 差异见
+`data/converter/docs/twse.md`，focused test 入口见
+`data/converter/docs/testing.md`。TAIFEX converter 尚未提取。

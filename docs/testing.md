@@ -32,122 +32,13 @@ ctest --preset debug
 `cmake/dependencies.cmake` 固定的 Nova commit。机器专用值可以放在不纳入
 git 的 `CMakeUserPresets.json`。
 
-## 数据下载脚本检查
+## 模块验证入口
 
-下载脚本修改后至少运行：
+模块专属 focused test、数据校验和完整文件兼容性命令由各模块自己的测试文档
+维护：
 
-```bash
-PYTHONDONTWRITEBYTECODE=1 \
-  python3 -m unittest -v tests/test_synology_pull.py
-bash -n scripts/pull-tw-raw
-scripts/pull-tw-raw --help
-scripts/synology-pull --help
-git diff --check
-```
-
-当前单元测试覆盖：
-
-- 完整 `.part` 不经网络请求直接发布。
-- `.part` symlink 被拒绝且不会修改 symlink 目标。
-- 未通过参数或 `SYNOLOGY_URL` 提供 NAS URL 时，CLI 拒绝执行。
-- `SYNOLOGY_URL` 可作为 CLI 默认值。
-
-查看定时任务：
-
-```bash
-crontab -l
-```
-
-查看下载进程：
-
-```bash
-pgrep -af 'pull-tw-raw|synology-pull'
-```
-
-查看 cron 日志：
-
-```bash
-tail -40 /data/log/crontab/future_daily.log
-tail -40 /data/log/crontab/stock_daily.log
-```
-
-查看 raw 数据落盘状态：
-
-```bash
-find /data/tw/raw -maxdepth 2 -type f \
-  \( -name '*.dump.tar.gz' -o -name '*.part' -o -name '*.dump' \) \
-  -printf '%p %s\n' | sort
-```
-
-检查已完成的 gzip：
-
-```bash
-gzip -t /data/tw/raw/future/taifex_YYYYMMDD.dump.tar.gz
-gzip -t /data/tw/raw/stock/twse_stock_YYYYMMDD.dump.tar.gz
-```
-
-## Dump 转 CSV 检查
-
-TWSE converter focused tests：
-
-```bash
-export VCPKG_ROOT=/home/liuxiang/vcpkg
-
-cmake --build --preset debug --target twse_converter_tests
-ctest --test-dir build/debug \
-  --output-on-failure \
-  -R '^(BcdDecoderTest|MessageDecoderTest|DumpConverterTest)'
-```
-
-测试覆盖：
-
-- BCD integer、decimal、exchange time 和非法 digit / time。
-- header、TWSE listed / TPEx service、format 1 / 6 / 17 / 22 / 23、协议
-  version、五种 filter mode 和 UTC+8 `trading_day`。
-- 非法 service / version / BCD / checksum / 日期、short body、超过五档、
-  截断 dump 和结束控制 symbol。
-- legacy CSV 内容、dry-run、默认拒绝覆盖、partial symlink 防护和原子发布。
-
-完整 dump 可先 dry-run：
-
-```bash
-./build/release/data/converter/twse_dump_converter \
-  --dump /home/liuxiang/data/raw/stock/twse_stock_20260707.dump \
-  --trading-day 20260707 \
-  --symbol-filter-mode stock \
-  --dry-run
-```
-
-完整兼容性验证应写入 `/home/liuxiang/tmp`，再与 Orion 基准比较：
-
-```bash
-sha256sum \
-  /home/liuxiang/tmp/<run>/twse_stock_20260707.csv \
-  /home/liuxiang/data/csv/stock/twse_stock_20260707.csv
-
-cmp \
-  /home/liuxiang/tmp/<run>/twse_stock_20260707.csv \
-  /home/liuxiang/data/csv/stock/twse_stock_20260707.csv
-```
-
-一次性转换至少记录输入、工具版本、config、输出路径、bytes、数据行数、列数、
-时间范围和 SHA-256。本轮 2026-07-07 的结果与边界见 `docs/data.md`。
-
-检查文件大小与 hash：
-
-```bash
-stat -c '%n %s bytes %y' \
-  /home/liuxiang/data/csv/future/taifex_20260707_stock_future.csv \
-  /home/liuxiang/data/csv/stock/twse_stock_20260707.csv
-
-sha256sum \
-  /home/liuxiang/data/csv/future/taifex_20260707_stock_future.csv \
-  /home/liuxiang/data/csv/stock/twse_stock_20260707.csv
-```
-
-本轮还对完整文件逐行检查：列数与 header 一致、symbol 非空、
-`symbol_id = -1`、`exchtime` / `localtime` 为整数，且 `exchtime` 位于配置的
-2026-07-07 本地交易日窗口。当前仓库尚未把这组检查封装成可复用命令。
+- data 下载与文件检查：`data/docs/testing.md`
+- data converter：`data/converter/docs/testing.md`
 
 ## 后续测试要求
 

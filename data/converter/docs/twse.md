@@ -6,9 +6,9 @@
 
 本实现以以下三项为事实源：
 
-- `docs/exchange/TWSE集中市場即時交易資訊傳輸規格書(B.12.11)(202503)_20250113092444.pdf`：
+- `data/docs/exchange/TWSE集中市場即時交易資訊傳輸規格書(B.12.11)(202503)_20250113092444.pdf`：
   上市股票，业务别 `01`。
-- `docs/exchange/上櫃股票IP行情網路規格書(V.12.16 TCPIP).pdf`：上柜股票，
+- `data/docs/exchange/上櫃股票IP行情網路規格書(V.12.16 TCPIP).pdf`：上柜股票，
   业务别 `02`。
 - `/home/liuxiang/dev/orion` 的 `4282286`：legacy CSV 行为基准。
 
@@ -92,3 +92,21 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
   仍由 synthetic fixture 覆盖。
 - legacy CSV 丢弃五档 volume。包含 volume 的正式研究 schema 需要单独设计、
   版本化和迁移，不能直接修改本兼容输出。
+
+## 已知问题与待处理项
+
+### Format 1 / 22 的 AL / NE 控制记录
+
+两份交易所规格规定，format 1 和 format 22 的 `股票筆數註記` 为空白时，
+`股票代號` 才代表证券；`AL` 表示循环末笔且 `股票代號` 保存证券总数，`NE`
+表示循环末笔且保存新增证券总数。
+
+当前 decoder 没有显式检查该字段。六位计数会被 `stock`、`etf` 和 `odd_lot`
+filter 排除，因此不影响当前普通股票、ETF 或零股 CSV；`all` / `warrant`
+可能把 format 1 计数创建为内部 pseudo symbol，通常只影响 `symbols_seen`。
+如果计数恰好与真实六位权证代码相同，基础价格状态存在被覆盖的潜在风险。
+
+2026-07-07 dump 共发现 167 条控制记录：TWSE 的 `AL=030488` 25 条、
+`NE=000256` 52 条；TPEx 的 `AL=010353` 38 条、`NE=000084` 52 条。该日未发现
+这些计数同时作为真实证券代码出现，已发布 `stock` CSV 不受影响。当前决定是
+记录该协议差异，暂不作为普通股票转换的优先修复。

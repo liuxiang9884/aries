@@ -91,7 +91,7 @@ tests/data/converter/twse/
 listed 使用 `service_type = 01`，TPEx / OTC 使用 `service_type = 02`；两种
 市场共用同一个 CLI。format 1 根据 service 选择不同 offset，其余已处理
 format 的 wire layout 相同。协议文档逐项核对和 Orion 差异见
-`docs/twse_converter.md`。
+`data/converter/docs/twse.md`。
 
 filter mode 为 `stock`、`etf`、`warrant`、`odd_lot`、`all`。为了保持 Orion
 兼容性，`stock` 沿用其四字符 symbol 判断，因此也会接受四字符 ETF；

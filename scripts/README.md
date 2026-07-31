@@ -320,7 +320,7 @@ pgrep -af 'pull-tw-raw'
 ```
 
 脚本本身不会自动定时启动；当前数据服务器的 `cron` 配置和日志路径见
-`docs/data.md`。其他环境如需无人值守同步，应另外配置 `systemd timer` 或
+`data/docs/data.md`。其他环境如需无人值守同步，应另外配置 `systemd timer` 或
 `cron`。
 
 ## 11. 下载单个文件

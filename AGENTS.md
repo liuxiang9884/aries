@@ -12,7 +12,13 @@
 - 对收益、回撤、Sharpe、IC、IR、hit rate、turnover、capacity、延迟、吞吐、存储效率或模型效果相关结论，必须基于实际回测、样本外验证、ablation、统计检验、profile、benchmark 或可复现实验，不凭主观判断宣称完成。
 - 代理自行创建的 log、scratch config、临时输出、实验临时产物和大体积中间结果默认写入 `~/tmp`（当前机器为 `/home/liuxiang/tmp`）或仓库既有 artifacts / build / cache 目录；除非用户明确要求或工具强制，不要把新的临时文件散落在仓库根目录，也不要把大数据文件、模型权重或实验缓存纳入 git。
 
-## 对话生命周期和 onboarding
+## 文档分层和 onboarding
+
+- 根目录的 `docs/` 只保存整个项目共用或跨模块的文档；模块专属文档放在该模块自己的 `docs/` 中。
+- 项目根目录和每个具备独立职责、入口与验证方式的模块都应有 onboarding；不要为单纯的支持目录或每一级子目录机械创建文档层。
+- README 保存相对稳定的用途、安装和使用说明；onboarding 保存当前事实、工作状态和下一步，不在两者之间复制内容。
+- 全局 onboarding 负责项目级状态、当前主线和跨模块边界；模块 onboarding 负责该模块的入口、contract、验证和下一步。
+- 专题内容只保留一个事实源。onboarding 只做接手入口和按需阅读指引，不承载完整设计、历史流水账、长日志或大段实验结果。
 
 ### 新对话启动
 
@@ -23,28 +29,21 @@ git status --short --branch
 git log --oneline -8
 ```
 
-然后按顺序读取：
+然后读取 `AGENTS.md`、全局 onboarding 和当前下一步对应的最具体模块
+onboarding。不要默认读取所有模块或逐级读取父模块 onboarding；需要额外
+contract、专题说明或验证细节时，再按当前 onboarding 的指引按需读取。
 
-```text
-AGENTS.md
-README.md
-docs/project_onboarding_guide.md
-docs/research_workflow.md
-docs/data.md
-docs/factors.md
-docs/backtesting.md
-docs/models.md
-docs/testing.md
-```
-
-如果某些文档不存在，先读取项目中最接近的 onboarding、README、研究流程、数据说明、回测说明、模型说明和测试说明。读取后以当前代码、文档、`git status` 和 `git log` 为事实源，不假设本地知识是最新的。
+读取后以当前代码、文档、`git status` 和 `git log` 为事实源，不假设本地
+知识是最新的。如果全局 onboarding 没有明确当前模块，先根据用户目标和当前
+仓库状态确定目标模块，再读取该模块 onboarding。
 
 ### Onboarding 文档书写规则
 
-`docs/project_onboarding_guide.md` 是新对话接手入口，不是完整历史记录或设计说明。更新 onboarding 时默认遵守：
+Onboarding 是新对话接手入口，不是完整历史记录或设计说明。更新时默认遵守：
 
 - 只写当前事实、关键入口、重要边界、验证命令、实验复现方式和下一步建议。
-- 细节放到对应专题文档：数据源 / schema / 存储放数据文档，因子定义和验证放因子文档，回测假设和撮合 / 成本模型放回测文档，模型结构和训练评估放模型文档。
+- 模块事实写入模块 onboarding；只有当前主线或跨模块状态发生变化时才更新全局 onboarding。
+- 细节放到所属模块的专题文档；跨模块 contract、项目级流程和统一规范放根目录专题文档。
 - 已完成内容按模块合并，避免逐轮追加历史流水账、完整 benchmark 输出、完整回测日志或已废弃方案。
 - 研究结论必须记录样本区间、频率、资产池、过滤条件、成本模型、训练 / 验证 / 测试切分、随机种子和关键指标；无法复现的结论不要写成事实。
 - 下一步建议必须可执行，具体到模块、文件、数据集、实验脚本或验证入口。
@@ -54,7 +53,7 @@ docs/testing.md
 当用户输入“结束对话”，或明确要求结束当前对话并交接时，默认执行：
 
 1. 运行 `git status --short --branch` 和 `git log --oneline -8`。
-2. 对照当前实现、实验产物和最近提交，更新相关文档，重点同步 `docs/project_onboarding_guide.md` 中的当前状态、代码入口、验证命令、实验结果边界和下一步建议。
+2. 对照当前实现、实验产物和最近提交，更新当前模块 onboarding 中的状态、入口、验证边界和下一步；只有当前主线或跨模块状态变化时才同步全局 onboarding。
 3. 如果本轮改动影响数据 schema、因子定义、回测假设、成本模型、训练评估流程或指标口径，同步更新对应专题文档。
 4. 至少运行 `git diff --check`；如果本轮修改了代码、实验脚本或数据处理逻辑，运行对应最小测试、回测 smoke、数据一致性检查或复现实验。
 5. 整理当前状态、已完成事项、验证命令、未完成风险和下一步建议。

@@ -51,7 +51,7 @@
 5. 完成 synthetic fixture tests、malformed/truncated tests 和 CLI smoke。
 6. 使用 2026-07-07 stock dump 做完整转换，与 Orion 输出比较 header、行数、
    bytes 和 SHA-256；不一致时定位到首个差异。
-7. 更新 `README.md`、`docs/data.md`、`docs/testing.md` 和 onboarding。
+7. 更新 `README.md`、data / converter 模块文档和 onboarding。
 
 ## 验证门
 
