@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <fstream>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -14,6 +15,31 @@
 #include "data/converter/twse/protocol.h"
 
 namespace aries::data::twse {
+namespace {
+
+void ValidateFrame(std::span<const std::uint8_t> raw_header,
+                   std::span<const std::uint8_t> body) {
+  if (body.size() < protocol::kMessageTrailerSize) {
+    throw std::runtime_error("TWSE message does not contain a trailer");
+  }
+  if (body[body.size() - 2] != '\r' || body[body.size() - 1] != '\n') {
+    throw std::runtime_error("TWSE message has invalid terminal code");
+  }
+
+  std::uint8_t checksum = 0;
+  for (const auto byte : raw_header.subspan(1)) {
+    checksum ^= byte;
+  }
+  for (const auto byte :
+       body.first(body.size() - protocol::kMessageTrailerSize)) {
+    checksum ^= byte;
+  }
+  if (checksum != body[body.size() - protocol::kMessageTrailerSize]) {
+    throw std::runtime_error("TWSE message has invalid checksum");
+  }
+}
+
+} // namespace
 
 ConvertStats ConvertDump(const ConvertOptions &options) {
   if (options.dump_path.empty()) {
@@ -64,6 +90,7 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
       if (input.gcount() != static_cast<std::streamsize>(body.size())) {
         throw std::runtime_error("truncated TWSE message body");
       }
+      ValidateFrame(raw_header, body);
 
       const auto *record = decoder.Process(header, body);
       ++stats.messages_read;

@@ -1,6 +1,6 @@
 # 数据说明
 
-更新时间：2026-07-31T17:31:34+08:00
+更新时间：2026-07-31T17:51:13+08:00
 
 ## 当前范围
 
@@ -49,7 +49,7 @@ manifest、分区格式或通用质量检查报告；当前 converter 生成的�
 
 ## 当前本地数据快照
 
-截至 2026-07-31T17:31:34+08:00：
+截至 2026-07-31T17:51:13+08:00：
 
 ```text
 /data/tw/raw/future/taifex_20260729.dump.tar.gz
@@ -88,6 +88,11 @@ tests/data/converter/twse/
 | 22 | odd-lot basic info | `odd_lot` mode 更新基础状态 |
 | 23 | odd-lot depth | `odd_lot` mode 输出 |
 
+listed 使用 `service_type = 01`，TPEx / OTC 使用 `service_type = 02`；两种
+市场共用同一个 CLI。format 1 根据 service 选择不同 offset，其余已处理
+format 的 wire layout 相同。协议文档逐项核对和 Orion 差异见
+`docs/twse_converter.md`。
+
 filter mode 为 `stock`、`etf`、`warrant`、`odd_lot`、`all`。为了保持 Orion
 兼容性，`stock` 沿用其四字符 symbol 判断，因此也会接受四字符 ETF；
 format 6 末尾 symbol 为 `000000`、时间为 `999999999999` 的结束控制消息会
@@ -121,9 +126,10 @@ total_volume,total_value,status,sequence
   Orion legacy CSV 不包含对应列。
 - 每个 symbol 跨消息保存 high / low limit、open、last、累计 volume 和
   Orion 当前增量口径的 `total_value`。
-- 非法 BCD、非法 message length、截断、非法 trailer 或超过五档会终止
-  转换。CSV 写入同目录 `.partial.<pid>`，成功 flush / close 后才 rename；
-  默认拒绝覆盖，`--overwrite` 显式允许替换。
+- 非法 service / format version / BCD / message length / checksum、截断、
+  非法 trailer 或超过五档会终止转换。CSV 写入同目录 `.partial.<pid>`，
+  成功 flush / close 后才 rename；默认拒绝覆盖，`--overwrite` 显式允许
+  替换。
 
 ## 2026-07-07 Dump 转 CSV
 
@@ -203,6 +209,12 @@ symbol，共读取 3,153,093,917 bytes。Aries 输出与 Orion 正式输出均�
 `cmp` 返回 0。完整 dump 的其余四种 filter mode 也已通过 dry-run；该 dump
 没有可供 `odd_lot` / `warrant` 输出的真实消息，因此这两种输出路径仍以
 synthetic fixture 为验证证据。
+
+严格校验后的完整 Aries 输出保留在：
+
+```text
+/home/liuxiang/tmp/aries-twse-final.P5bwWQ/twse_stock_20260707.csv
+```
 
 ## 未完成事项
 

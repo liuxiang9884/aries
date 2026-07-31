@@ -91,6 +91,33 @@ TEST_F(DumpConverterTest, ConvertsDumpToLegacyCsvAndPublishesAtomically) {
   }
 }
 
+TEST_F(DumpConverterTest, ConvertsTpexMessagesWithOtcBasicInfoLayout) {
+  std::vector<std::uint8_t> dump;
+  const auto basic =
+      test::MakeStockBasic("6488", 500000, 550000, 450000, ServiceType::kOtc);
+  test::AppendMessage(dump, MessageType::kStockBasicInfo, basic, 1,
+                      ServiceType::kOtc);
+  constexpr std::array<Level, 1> kLevels{{
+      {.price = 510000, .volume = 3},
+  }};
+  const auto depth =
+      test::MakeDepth("6488", 90000000000, 3, true, 0, 0, kLevels);
+  test::AppendMessage(dump, MessageType::kStockDepthV, depth, 2,
+                      ServiceType::kOtc);
+  test::WriteBinaryFile(dump_path_, dump);
+
+  const auto stats = ConvertDump(MakeOptions());
+
+  EXPECT_EQ(stats.messages_read, 2);
+  EXPECT_EQ(stats.rows_written, 1);
+  std::ifstream input(output_path_, std::ios::binary);
+  const std::string csv((std::istreambuf_iterator<char>(input)),
+                        std::istreambuf_iterator<char>());
+  EXPECT_NE(csv.find("6488,-1,1783386000000000000,1783386000000000000,"
+                     "55.00,45.00,51.00"),
+            std::string::npos);
+}
+
 TEST_F(DumpConverterTest, DryRunDoesNotCreateOutput) {
   const auto dump = MakeStockDump();
   test::WriteBinaryFile(dump_path_, dump);
@@ -132,6 +159,15 @@ TEST_F(DumpConverterTest, TruncatedDumpDoesNotPublishOutputOrLeavePartial) {
     EXPECT_EQ(entry.path().filename().string().find(".partial."),
               std::string::npos);
   }
+}
+
+TEST_F(DumpConverterTest, RejectsInvalidMessageChecksum) {
+  auto dump = MakeStockDump();
+  dump[dump.size() - protocol::kMessageTrailerSize] ^= 0xFFU;
+  test::WriteBinaryFile(dump_path_, dump);
+
+  EXPECT_THROW((void)ConvertDump(MakeOptions()), std::runtime_error);
+  EXPECT_FALSE(std::filesystem::exists(output_path_));
 }
 
 TEST_F(DumpConverterTest, RefusesToOverwriteByDefault) {

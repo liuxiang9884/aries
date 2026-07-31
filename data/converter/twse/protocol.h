@@ -52,6 +52,10 @@ inline constexpr std::size_t kMaximumMessageSize = 9'999;
 inline constexpr std::size_t kSymbolSize = 6;
 inline constexpr std::size_t kMessageTrailerSize = 3;
 
+inline constexpr std::uint8_t kStockBasicFormatVersion = 9;
+inline constexpr std::uint8_t kStockDepthFormatVersion = 4;
+inline constexpr std::uint8_t kOddLotFormatVersion = 1;
+
 inline constexpr std::size_t kStockBasicBodySize = 104;
 inline constexpr std::size_t kListedPreviousCloseOffset = 30;
 inline constexpr std::size_t kListedHighLimitOffset = 35;

@@ -91,6 +91,28 @@ std::pair<double, std::int64_t> DecodeLevel(std::span<const std::uint8_t> body,
   return {price, static_cast<std::int64_t>(volume)};
 }
 
+void RequireSupportedFormatVersion(const MessageHeader &header) {
+  std::uint8_t expected_version;
+  switch (header.message_type) {
+  case MessageType::kStockBasicInfo:
+    expected_version = protocol::kStockBasicFormatVersion;
+    break;
+  case MessageType::kStockDepthV:
+  case MessageType::kWarrantDepthV:
+    expected_version = protocol::kStockDepthFormatVersion;
+    break;
+  case MessageType::kStockOddLotBasicInfo:
+  case MessageType::kStockOddLotDepthV:
+    expected_version = protocol::kOddLotFormatVersion;
+    break;
+  default:
+    return;
+  }
+  if (header.format_version != expected_version) {
+    throw std::runtime_error("unsupported TWSE message format version");
+  }
+}
+
 } // namespace
 
 SymbolFilterMode ParseSymbolFilterMode(std::string_view mode) {
@@ -163,10 +185,15 @@ MessageHeader DecodeMessageHeader(std::span<const std::uint8_t> bytes) {
     throw std::runtime_error("TWSE message length is out of range");
   }
 
+  const auto service_type = DecodeBcdInteger(bytes.subspan(3, 1));
+  if (service_type != static_cast<std::uint8_t>(ServiceType::kListed) &&
+      service_type != static_cast<std::uint8_t>(ServiceType::kOtc)) {
+    throw std::runtime_error("TWSE message has unsupported service type");
+  }
+
   return MessageHeader{
       .message_length = static_cast<std::size_t>(message_length),
-      .service_type =
-          static_cast<ServiceType>(DecodeBcdInteger(bytes.subspan(3, 1))),
+      .service_type = static_cast<ServiceType>(service_type),
       .message_type =
           static_cast<MessageType>(DecodeBcdInteger(bytes.subspan(4, 1))),
       .format_version =
@@ -201,6 +228,7 @@ const DepthRecord *MessageDecoder::Process(const MessageHeader &header,
   if (header.message_length != protocol::kHeaderSize + body.size()) {
     throw std::runtime_error("TWSE header and body lengths do not match");
   }
+  RequireSupportedFormatVersion(header);
 
   switch (header.message_type) {
   case MessageType::kStockBasicInfo:

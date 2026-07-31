@@ -1,6 +1,6 @@
 # 验证说明
 
-更新时间：2026-07-31T17:31:34+08:00
+更新时间：2026-07-31T17:51:13+08:00
 
 ## 基础检查
 
@@ -102,9 +102,10 @@ ctest --test-dir build/debug \
 测试覆盖：
 
 - BCD integer、decimal、exchange time 和非法 digit / time。
-- header、format 1 / 6 / 17 / 22 / 23、五种 filter mode 和 UTC+8
-  `trading_day`。
-- 非法日期、short body、超过五档、截断 dump 和结束控制 symbol。
+- header、TWSE listed / TPEx service、format 1 / 6 / 17 / 22 / 23、协议
+  version、五种 filter mode 和 UTC+8 `trading_day`。
+- 非法 service / version / BCD / checksum / 日期、short body、超过五档、
+  截断 dump 和结束控制 symbol。
 - legacy CSV 内容、dry-run、默认拒绝覆盖、partial symlink 防护和原子发布。
 
 完整 dump 可先 dry-run：

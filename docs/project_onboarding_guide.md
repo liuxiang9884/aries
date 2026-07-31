@@ -1,6 +1,6 @@
 # Aries 项目接手指南
 
-更新时间：2026-07-31T17:31:34+08:00
+更新时间：2026-07-31T17:51:13+08:00
 
 ## 当前仓库状态
 
@@ -11,6 +11,9 @@
 - `data/converter/twse/` 已包含 BCD、message decoder、state、legacy CSV
   writer、dump framing 和 `twse_dump_converter` CLI；头文件与实现文件在
   同一目录。`data/converter/taifex/` 仍是待提取骨架。
+- TWSE converter 同时支持 `service_type = 01` 的上市股票和
+  `service_type = 02` 的 TPEx / OTC 股票；协议核对、兼容语义及所有有意的
+  Orion 差异集中记录在 `docs/twse_converter.md`。
 - `README.md` 记录当前构建入口和本地 Nova source override 用法。
 - `scripts/` 提供台湾 raw 数据 NAS 下载入口和使用说明；
   `tests/test_synology_pull.py` 覆盖关键续传与配置边界。
@@ -47,7 +50,8 @@
   `docs/data.md`。这些 CSV 尚未纳入正式版本化数据 contract。
 - Aries TWSE converter 对完整 2026-07-07 stock dump 读取 25,993,761 条
   message，生成 15,886,026 条数据行；输出 bytes、SHA-256 与 Orion CSV
-  完全相同，`cmp` 返回 0。
+  完全相同，`cmp` 返回 0。验证时已启用 service、format version、XOR
+  checksum、terminal 和动态长度校验。
 
 ## 外部依赖状态
 

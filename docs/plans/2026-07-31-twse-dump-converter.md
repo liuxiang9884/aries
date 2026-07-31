@@ -77,9 +77,10 @@
 
 ## 验证结果
 
-- Debug CTest 共 19 项通过，覆盖 BCD、header、format 1 / 6 / 17 / 22 /
-  23、五种 filter mode、非法日期、截断输入、超过五档、dry-run、默认拒绝
-  覆盖、partial symlink 和原子发布。
+- 完整 CTest 共 23 项通过，其中 21 项为 TWSE focused tests，覆盖 BCD、
+  listed / TPEx header、format 1 / 6 / 17 / 22 / 23、协议 version、五种
+  filter mode、非法日期 / checksum、截断输入、超过五档、dry-run、默认
+  拒绝覆盖、partial symlink 和原子发布。
 - 2026-07-07 stock dump dry-run 读取 25,993,761 条消息、输出
   15,886,026 行、维护 1,979 个 symbol，读取 3,153,093,917 bytes。
 - Aries 生成文件与 Orion 已发布 CSV 均为 2,742,684,274 bytes（含 header

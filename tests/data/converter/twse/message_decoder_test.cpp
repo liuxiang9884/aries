@@ -53,15 +53,43 @@ TEST(MessageDecoderTest, AppliesBasicInfoAndDecodesStockDepthState) {
   EXPECT_EQ(decoder.symbol_count(), 1);
 }
 
+TEST(MessageDecoderTest, AppliesTpexBasicInfoOffsets) {
+  MessageDecoder decoder(20260707, SymbolFilterMode::kStock);
+  const auto basic =
+      test::MakeStockBasic("6488", 500000, 550000, 450000, ServiceType::kOtc);
+
+  EXPECT_EQ(
+      decoder.Process(test::MakeHeader(MessageType::kStockBasicInfo,
+                                       basic.size(), 1, ServiceType::kOtc),
+                      basic),
+      nullptr);
+
+  constexpr std::array<Level, 1> kLevels{{
+      {.price = 510000, .volume = 3},
+  }};
+  const auto depth =
+      test::MakeDepth("6488", 90000000000, 3, true, 0, 0, kLevels);
+  const auto *record =
+      decoder.Process(test::MakeHeader(MessageType::kStockDepthV, depth.size(),
+                                       2, ServiceType::kOtc),
+                      depth);
+
+  ASSERT_NE(record, nullptr);
+  EXPECT_DOUBLE_EQ(record->previous_close, 50.0);
+  EXPECT_DOUBLE_EQ(record->high_limit, 55.0);
+  EXPECT_DOUBLE_EQ(record->low_limit, 45.0);
+  EXPECT_DOUBLE_EQ(record->last_price, 51.0);
+}
+
 TEST(MessageDecoderTest, DecodesAndValidatesMessageHeader) {
   constexpr std::array<std::uint8_t, protocol::kHeaderSize> kHeader{
-      0x1B, 0x00, 0x32, 0x01, 0x06, 0x09, 0x00, 0x00, 0x01, 0x23};
+      0x1B, 0x00, 0x32, 0x01, 0x06, 0x04, 0x00, 0x00, 0x01, 0x23};
   const auto header = DecodeMessageHeader(kHeader);
 
   EXPECT_EQ(header.message_length, 32);
   EXPECT_EQ(header.service_type, ServiceType::kListed);
   EXPECT_EQ(header.message_type, MessageType::kStockDepthV);
-  EXPECT_EQ(header.format_version, 9);
+  EXPECT_EQ(header.format_version, 4);
   EXPECT_EQ(header.sequence, 123);
 
   auto invalid_header = kHeader;
@@ -77,6 +105,10 @@ TEST(MessageDecoderTest, DecodesAndValidatesMessageHeader) {
   invalid_header[2] = 0xFA;
   EXPECT_THROW((void)DecodeMessageHeader(invalid_header),
                std::invalid_argument);
+
+  invalid_header = kHeader;
+  invalid_header[3] = 0x03;
+  EXPECT_THROW((void)DecodeMessageHeader(invalid_header), std::runtime_error);
 }
 
 TEST(MessageDecoderTest, SupportsOddLotAndWarrantOutputModes) {
@@ -155,6 +187,17 @@ TEST(MessageDecoderTest, RejectsOversizedLevelCountAndShortBody) {
                                                       kShortBody.size()),
                                      kShortBody),
                std::runtime_error);
+}
+
+TEST(MessageDecoderTest, RejectsUnsupportedFormatVersion) {
+  MessageDecoder decoder(20260707, SymbolFilterMode::kStock);
+  constexpr std::array<Level, 0> kNoLevels{};
+  const auto depth =
+      test::MakeDepth("2330", 90000000000, 0, false, 0, 0, kNoLevels);
+  auto header = test::MakeHeader(MessageType::kStockDepthV, depth.size(), 1);
+  header.format_version = 5;
+
+  EXPECT_THROW((void)decoder.Process(header, depth), std::runtime_error);
 }
 
 TEST(MessageDecoderTest, RejectsInvalidMessageTrailer) {

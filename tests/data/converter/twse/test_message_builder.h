@@ -158,11 +158,25 @@ MakeOddLotDepth(std::string_view symbol, std::uint64_t exchange_time,
 inline MessageHeader MakeHeader(MessageType type, std::size_t body_size,
                                 std::uint64_t sequence = 0,
                                 ServiceType service = ServiceType::kListed) {
+  std::uint8_t format_version = protocol::kOddLotFormatVersion;
+  switch (type) {
+  case MessageType::kStockBasicInfo:
+    format_version = protocol::kStockBasicFormatVersion;
+    break;
+  case MessageType::kStockDepthV:
+  case MessageType::kWarrantDepthV:
+    format_version = protocol::kStockDepthFormatVersion;
+    break;
+  case MessageType::kStockOddLotBasicInfo:
+  case MessageType::kStockOddLotDepthV:
+  default:
+    break;
+  }
   return MessageHeader{
       .message_length = protocol::kHeaderSize + body_size,
       .service_type = service,
       .message_type = type,
-      .format_version = 9,
+      .format_version = format_version,
       .sequence = sequence,
   };
 }
@@ -186,6 +200,16 @@ inline void AppendMessage(std::vector<std::uint8_t> &dump, MessageType type,
   std::copy(encoded_sequence.begin(), encoded_sequence.end(),
             dump.begin() + start + 6);
   dump.insert(dump.end(), body.begin(), body.end());
+
+  if (body.size() < protocol::kMessageTrailerSize) {
+    throw std::invalid_argument("message body does not contain a trailer");
+  }
+  std::uint8_t checksum = 0;
+  for (auto i = start + 1; i < dump.size() - protocol::kMessageTrailerSize;
+       ++i) {
+    checksum ^= dump[i];
+  }
+  dump[dump.size() - protocol::kMessageTrailerSize] = checksum;
 }
 
 inline void WriteBinaryFile(const std::filesystem::path &path,
