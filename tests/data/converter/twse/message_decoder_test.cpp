@@ -150,6 +150,36 @@ TEST(MessageDecoderTest, SupportsOddLotAndWarrantOutputModes) {
   EXPECT_EQ(warrant_record->sequence, 11);
 }
 
+TEST(MessageDecoderTest, UsesFormat1MetadataForNonstandardWarrantSymbol) {
+  MessageDecoder decoder(20260707, SymbolFilterMode::kWarrant);
+  const test::BasicInfoFields fields{
+      .symbol = "1234P",
+      .security_type = "W2",
+      .warrant_flag = 'Y',
+      .strike_price = 10000,
+      .exercise_ratio = 100,
+      .maturity_date = 20261231,
+      .market_data_line = 2,
+  };
+  const auto basic = test::MakeBasicInfo(fields);
+  EXPECT_EQ(
+      decoder.Process(
+          test::MakeHeader(MessageType::kStockBasicInfo, basic.size()), basic),
+      nullptr);
+
+  constexpr std::array<Level, 1> kLevels{{
+      {.price = 12300, .volume = 7},
+  }};
+  const auto depth =
+      test::MakeDepth("1234P", 90000000000, 7, true, 0, 0, kLevels);
+  const auto *record = decoder.Process(
+      test::MakeHeader(MessageType::kWarrantDepthV, depth.size(), 12), depth);
+
+  ASSERT_NE(record, nullptr);
+  EXPECT_EQ(record->symbol, "1234P");
+  EXPECT_EQ(record->sequence, 12);
+}
+
 TEST(MessageDecoderTest, PreservesOrionSymbolFilterSemantics) {
   EXPECT_TRUE(MatchesSymbol(SymbolFilterMode::kStock, "2330  "));
   EXPECT_TRUE(MatchesSymbol(SymbolFilterMode::kStock, "0050  "));

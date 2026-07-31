@@ -8,6 +8,7 @@
 #include <fstream>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -19,6 +20,39 @@ namespace aries::data::twse::test {
 struct Level {
   std::uint64_t price;
   std::uint64_t volume;
+};
+
+struct BasicInfoFields {
+  std::string symbol{"2330"};
+  ServiceType service_type{ServiceType::kListed};
+  std::string industry_code{"01"};
+  std::string security_type{"00"};
+  std::string stock_entries{"  "};
+  std::uint64_t anomaly_code{};
+  char stock_group_code{' '};
+  char board_code{'0'};
+  std::uint64_t reference_price{900000};
+  std::uint64_t high_limit{990000};
+  std::uint64_t low_limit{810000};
+  char abnormal_recommendation{' '};
+  char special_abnormal{' '};
+  char day_trading_code{' '};
+  char margin_short_exempt{' '};
+  char borrow_short_exempt{' '};
+  std::uint64_t matching_cycle_seconds{};
+  char warrant_flag{' '};
+  std::uint64_t strike_price{};
+  std::uint64_t previous_exercise_volume{};
+  std::uint64_t previous_cancellation_volume{};
+  std::uint64_t outstanding_volume{};
+  std::uint64_t exercise_ratio{};
+  std::uint64_t warrant_upper_price{};
+  std::uint64_t warrant_lower_price{};
+  std::uint64_t maturity_date{};
+  char foreign_stock_flag{' '};
+  std::uint64_t multiplier{1000};
+  std::string currency{"   "};
+  std::uint64_t market_data_line{1};
 };
 
 template <std::size_t Size>
@@ -54,24 +88,82 @@ inline void PutSymbol(std::vector<std::uint8_t> &output,
   std::copy(symbol.begin(), symbol.end(), output.begin());
 }
 
+inline void PutAscii(std::vector<std::uint8_t> &output, std::size_t offset,
+                     std::size_t size, std::string_view value) {
+  if (value.size() > size) {
+    throw std::invalid_argument("ASCII value is too long");
+  }
+  std::fill_n(output.begin() + static_cast<std::ptrdiff_t>(offset), size,
+              static_cast<std::uint8_t>(' '));
+  std::copy(value.begin(), value.end(),
+            output.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+inline std::vector<std::uint8_t> MakeBasicInfo(const BasicInfoFields &fields) {
+  std::vector<std::uint8_t> body(protocol::kStockBasicBodySize);
+  PutSymbol(body, fields.symbol);
+  PutAscii(body, 22, 2, fields.industry_code);
+  PutAscii(body, 24, 2, fields.security_type);
+  PutAscii(body, 26, 2, fields.stock_entries);
+  PutBcd<1>(body, 28, fields.anomaly_code);
+
+  const bool listed = fields.service_type == ServiceType::kListed;
+  const std::size_t shift = listed ? 0U : 1U;
+  if (!listed) {
+    body[29] = static_cast<std::uint8_t>(fields.stock_group_code);
+  }
+  body[29 + shift] = static_cast<std::uint8_t>(fields.board_code);
+  PutBcd<5>(body, 30 + shift, fields.reference_price);
+  PutBcd<5>(body, 35 + shift, fields.high_limit);
+  PutBcd<5>(body, 40 + shift, fields.low_limit);
+  body[46 + shift] = static_cast<std::uint8_t>(fields.abnormal_recommendation);
+  body[47 + shift] = static_cast<std::uint8_t>(fields.special_abnormal);
+  body[48 + shift] = static_cast<std::uint8_t>(fields.day_trading_code);
+  body[49 + shift] = static_cast<std::uint8_t>(fields.margin_short_exempt);
+  body[50 + shift] = static_cast<std::uint8_t>(fields.borrow_short_exempt);
+  PutBcd<3>(body, 51 + shift, fields.matching_cycle_seconds);
+  body[54 + shift] = static_cast<std::uint8_t>(fields.warrant_flag);
+  PutBcd<5>(body, 55 + shift, fields.strike_price);
+  PutBcd<5>(body, 60 + shift, fields.previous_exercise_volume);
+  PutBcd<5>(body, 65 + shift, fields.previous_cancellation_volume);
+  PutBcd<5>(body, 70 + shift, fields.outstanding_volume);
+  PutBcd<4>(body, 75 + shift, fields.exercise_ratio);
+  PutBcd<5>(body, 79 + shift, fields.warrant_upper_price);
+  PutBcd<5>(body, 84 + shift, fields.warrant_lower_price);
+  PutBcd<4>(body, 89 + shift, fields.maturity_date);
+  if (listed) {
+    body[93] = static_cast<std::uint8_t>(fields.foreign_stock_flag);
+  }
+  PutBcd<3>(body, 94, fields.multiplier);
+  PutAscii(body, 97, 3, fields.currency);
+  PutBcd<1>(body, 100, fields.market_data_line);
+  body[body.size() - 2] = '\r';
+  body[body.size() - 1] = '\n';
+  return body;
+}
+
+inline std::vector<std::uint8_t>
+MakeBasicControl(std::string_view count, std::string_view control,
+                 ServiceType service_type = ServiceType::kListed) {
+  BasicInfoFields fields{
+      .symbol = std::string(count),
+      .service_type = service_type,
+      .stock_entries = std::string(control),
+  };
+  return MakeBasicInfo(fields);
+}
+
 inline std::vector<std::uint8_t>
 MakeStockBasic(std::string_view symbol, std::uint64_t previous_close,
                std::uint64_t high_limit, std::uint64_t low_limit,
                ServiceType service_type = ServiceType::kListed) {
-  std::vector<std::uint8_t> body(protocol::kStockBasicBodySize);
-  PutSymbol(body, symbol);
-  if (service_type == ServiceType::kListed) {
-    PutBcd<5>(body, protocol::kListedPreviousCloseOffset, previous_close);
-    PutBcd<5>(body, protocol::kListedHighLimitOffset, high_limit);
-    PutBcd<5>(body, protocol::kListedLowLimitOffset, low_limit);
-  } else {
-    PutBcd<5>(body, protocol::kOtcPreviousCloseOffset, previous_close);
-    PutBcd<5>(body, protocol::kOtcHighLimitOffset, high_limit);
-    PutBcd<5>(body, protocol::kOtcLowLimitOffset, low_limit);
-  }
-  body[body.size() - 2] = '\r';
-  body[body.size() - 1] = '\n';
-  return body;
+  return MakeBasicInfo(BasicInfoFields{
+      .symbol = std::string(symbol),
+      .service_type = service_type,
+      .reference_price = previous_close,
+      .high_limit = high_limit,
+      .low_limit = low_limit,
+  });
 }
 
 inline std::vector<std::uint8_t> MakeOddLotBasic(std::string_view symbol,

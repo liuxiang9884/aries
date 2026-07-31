@@ -10,6 +10,7 @@ namespace aries::data::twse {
 struct ConvertOptions {
   std::filesystem::path dump_path;
   std::filesystem::path output_path;
+  std::filesystem::path basic_output_path;
   std::int32_t trading_day{};
   SymbolFilterMode symbol_filter_mode{SymbolFilterMode::kStock};
   bool dry_run{false};
@@ -21,6 +22,10 @@ struct ConvertStats {
   std::uint64_t rows_written{};
   std::uint64_t symbols_seen{};
   std::uint64_t bytes_read{};
+  std::uint64_t basic_info_messages{};
+  std::uint64_t basic_info_controls{};
+  std::uint64_t basic_info_duplicates{};
+  std::uint64_t basic_info_rows{};
 };
 
 [[nodiscard]] ConvertStats ConvertDump(const ConvertOptions &options);

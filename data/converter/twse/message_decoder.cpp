@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 
+#include "data/converter/twse/basic_info.h"
 #include "data/converter/twse/bcd_decoder.h"
 
 namespace aries::data::twse {
@@ -221,7 +222,7 @@ std::int64_t TradingDayStartNanoseconds(std::int32_t trading_day) {
 
 MessageDecoder::MessageDecoder(std::int32_t trading_day, SymbolFilterMode mode)
     : trading_day_start_ns_(TradingDayStartNanoseconds(trading_day)),
-      mode_(mode) {}
+      trading_day_(trading_day), mode_(mode) {}
 
 const DepthRecord *MessageDecoder::Process(const MessageHeader &header,
                                            std::span<const std::uint8_t> body) {
@@ -265,11 +266,13 @@ MessageDecoder::FindOrCreate(std::span<const std::uint8_t> exchange_symbol) {
   const std::string_view raw_symbol(
       reinterpret_cast<const char *>(exchange_symbol.data()),
       exchange_symbol.size());
-  if (!MatchesSymbol(mode_, raw_symbol)) {
+  auto symbol = NormalizeSymbol(exchange_symbol);
+  const bool metadata_warrant =
+      mode_ == SymbolFilterMode::kWarrant && warrant_symbols_.contains(symbol);
+  if (!MatchesSymbol(mode_, raw_symbol) && !metadata_warrant) {
     return nullptr;
   }
 
-  auto symbol = NormalizeSymbol(exchange_symbol);
   auto [iterator, inserted] = records_.try_emplace(symbol);
   if (inserted) {
     iterator->second.symbol = std::move(symbol);
@@ -279,34 +282,31 @@ MessageDecoder::FindOrCreate(std::span<const std::uint8_t> exchange_symbol) {
 
 void MessageDecoder::ProcessBasicInfo(const MessageHeader &header,
                                       std::span<const std::uint8_t> body) {
-  RequireBodySize(body, protocol::kStockBasicBodySize, "stock basic info");
-  RequireTrailer(body);
-  auto *record = FindOrCreate(body.first(protocol::kSymbolSize));
+  const auto decoded = DecodeBasicInfo(trading_day_, header, body);
+  if (decoded.record.has_value()) {
+    ApplyBasicInfo(*decoded.record);
+  }
+}
+
+void MessageDecoder::ApplyBasicInfo(const BasicInfoRecord &basic_info) {
+  if (IsWarrantSecurity(basic_info)) {
+    warrant_symbols_.insert(basic_info.symbol);
+  }
+
+  std::string exchange_symbol = basic_info.symbol;
+  if (exchange_symbol.size() > protocol::kSymbolSize) {
+    throw std::runtime_error("TWSE basic-info symbol exceeds six bytes");
+  }
+  exchange_symbol.resize(protocol::kSymbolSize, ' ');
+  auto *record = FindOrCreate(std::span<const std::uint8_t>(
+      reinterpret_cast<const std::uint8_t *>(exchange_symbol.data()),
+      exchange_symbol.size()));
   if (record == nullptr) {
     return;
   }
-
-  std::size_t previous_close_offset;
-  std::size_t high_limit_offset;
-  std::size_t low_limit_offset;
-  switch (header.service_type) {
-  case ServiceType::kListed:
-    previous_close_offset = protocol::kListedPreviousCloseOffset;
-    high_limit_offset = protocol::kListedHighLimitOffset;
-    low_limit_offset = protocol::kListedLowLimitOffset;
-    break;
-  case ServiceType::kOtc:
-    previous_close_offset = protocol::kOtcPreviousCloseOffset;
-    high_limit_offset = protocol::kOtcHighLimitOffset;
-    low_limit_offset = protocol::kOtcLowLimitOffset;
-    break;
-  default:
-    throw std::runtime_error("stock basic info has invalid service type");
-  }
-
-  record->previous_close = DecodePrice(body.subspan(previous_close_offset, 5));
-  record->high_limit = DecodePrice(body.subspan(high_limit_offset, 5));
-  record->low_limit = DecodePrice(body.subspan(low_limit_offset, 5));
+  record->previous_close = basic_info.reference_price;
+  record->high_limit = basic_info.high_limit;
+  record->low_limit = basic_info.low_limit;
 }
 
 void MessageDecoder::ProcessOddLotBasicInfo(

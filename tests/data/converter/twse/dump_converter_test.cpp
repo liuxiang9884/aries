@@ -27,6 +27,7 @@ protected:
     std::filesystem::create_directories(directory_);
     dump_path_ = directory_ / "input.dump";
     output_path_ = directory_ / "output.csv";
+    basic_output_path_ = directory_ / "basic_info.csv";
   }
 
   void TearDown() override { std::filesystem::remove_all(directory_); }
@@ -51,6 +52,7 @@ protected:
     return ConvertOptions{
         .dump_path = dump_path_,
         .output_path = output_path_,
+        .basic_output_path = basic_output_path_,
         .trading_day = 20260707,
         .symbol_filter_mode = SymbolFilterMode::kStock,
     };
@@ -59,6 +61,7 @@ protected:
   std::filesystem::path directory_;
   std::filesystem::path dump_path_;
   std::filesystem::path output_path_;
+  std::filesystem::path basic_output_path_;
 };
 
 TEST_F(DumpConverterTest, ConvertsDumpToLegacyCsvAndPublishesAtomically) {
@@ -70,7 +73,10 @@ TEST_F(DumpConverterTest, ConvertsDumpToLegacyCsvAndPublishesAtomically) {
   EXPECT_EQ(stats.messages_read, 2);
   EXPECT_EQ(stats.rows_written, 1);
   EXPECT_EQ(stats.symbols_seen, 1);
+  EXPECT_EQ(stats.basic_info_messages, 1);
+  EXPECT_EQ(stats.basic_info_rows, 1);
   ASSERT_TRUE(std::filesystem::exists(output_path_));
+  ASSERT_TRUE(std::filesystem::exists(basic_output_path_));
 
   std::ifstream input(output_path_, std::ios::binary);
   const std::string csv((std::istreambuf_iterator<char>(input)),
@@ -84,6 +90,22 @@ TEST_F(DumpConverterTest, ConvertsDumpToLegacyCsvAndPublishesAtomically) {
       "95.10,94.90,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,95.00,10,"
       "100,9500.00,524434,123\n";
   EXPECT_EQ(csv, expected);
+
+  std::ifstream basic_input(basic_output_path_, std::ios::binary);
+  const std::string basic_csv((std::istreambuf_iterator<char>(basic_input)),
+                              std::istreambuf_iterator<char>());
+  const std::string basic_expected =
+      "trading_day,market,symbol,industry_code,security_type,anomaly_code,"
+      "stock_group_code,board_code,reference_price,high_limit,low_limit,"
+      "abnormal_recommendation,special_abnormal,day_trading_code,"
+      "margin_short_exempt,borrow_short_exempt,matching_cycle_seconds,"
+      "warrant_flag,strike_price,previous_exercise_volume,"
+      "previous_cancellation_volume,outstanding_volume,exercise_ratio,"
+      "warrant_upper_price,warrant_lower_price,maturity_date,"
+      "foreign_stock_flag,multiplier,currency,market_data_line\n"
+      "20260707,TWSE,2330,01,00,0,,0,90.0000,99.0000,81.0000,,,,,,0,"
+      ",,,,,,,,,,1000,TWD,1\n";
+  EXPECT_EQ(basic_csv, basic_expected);
 
   for (const auto &entry : std::filesystem::directory_iterator(directory_)) {
     EXPECT_EQ(entry.path().filename().string().find(".partial."),
@@ -110,12 +132,72 @@ TEST_F(DumpConverterTest, ConvertsTpexMessagesWithOtcBasicInfoLayout) {
 
   EXPECT_EQ(stats.messages_read, 2);
   EXPECT_EQ(stats.rows_written, 1);
+  EXPECT_EQ(stats.basic_info_rows, 1);
   std::ifstream input(output_path_, std::ios::binary);
   const std::string csv((std::istreambuf_iterator<char>(input)),
                         std::istreambuf_iterator<char>());
   EXPECT_NE(csv.find("6488,-1,1783386000000000000,1783386000000000000,"
                      "55.00,45.00,51.00"),
             std::string::npos);
+}
+
+TEST_F(DumpConverterTest, WritesWarrantBasicInfoWithStableUnitsAndFormatting) {
+  const test::BasicInfoFields fields{
+      .symbol = "067288",
+      .industry_code = "00",
+      .security_type = "W2",
+      .anomaly_code = 3,
+      .reference_price = 16600,
+      .high_limit = 25900,
+      .low_limit = 7300,
+      .abnormal_recommendation = 'Y',
+      .special_abnormal = 'N',
+      .day_trading_code = 'Y',
+      .margin_short_exempt = 'S',
+      .borrow_short_exempt = 'B',
+      .matching_cycle_seconds = 20,
+      .warrant_flag = 'Y',
+      .strike_price = 79275,
+      .previous_exercise_volume = 12,
+      .previous_cancellation_volume = 3,
+      .outstanding_volume = 2000,
+      .exercise_ratio = 1400,
+      .warrant_upper_price = 30000,
+      .warrant_lower_price = 100,
+      .maturity_date = 20261217,
+      .foreign_stock_flag = 'N',
+      .currency = "   ",
+      .market_data_line = 2,
+  };
+  std::vector<std::uint8_t> dump;
+  const auto basic = test::MakeBasicInfo(fields);
+  test::AppendMessage(dump, MessageType::kStockBasicInfo, basic, 1);
+  test::WriteBinaryFile(dump_path_, dump);
+
+  const auto stats = ConvertDump(MakeOptions());
+
+  EXPECT_EQ(stats.rows_written, 0);
+  EXPECT_EQ(stats.basic_info_rows, 1);
+  std::ifstream input(basic_output_path_, std::ios::binary);
+  const std::string csv((std::istreambuf_iterator<char>(input)),
+                        std::istreambuf_iterator<char>());
+  EXPECT_NE(csv.find("20260707,TWSE,067288,00,W2,3,,0,1.6600,2.5900,0.7300,"
+                     "Y,N,Y,S,B,20,Y,7.9275,12000,3000,2000000,0.01400,3.0000,"
+                     "0.0100,2026-12-17,N,1000,TWD,2\n"),
+            std::string::npos);
+}
+
+TEST_F(DumpConverterTest, RequiresTwoDistinctOutputPaths) {
+  const auto dump = MakeStockDump();
+  test::WriteBinaryFile(dump_path_, dump);
+  auto options = MakeOptions();
+  options.basic_output_path.clear();
+  EXPECT_THROW((void)ConvertDump(options), std::invalid_argument);
+
+  options = MakeOptions();
+  options.basic_output_path = options.output_path;
+  EXPECT_THROW((void)ConvertDump(options), std::invalid_argument);
+  EXPECT_FALSE(std::filesystem::exists(output_path_));
 }
 
 TEST_F(DumpConverterTest, DryRunDoesNotCreateOutput) {
@@ -128,6 +210,7 @@ TEST_F(DumpConverterTest, DryRunDoesNotCreateOutput) {
 
   EXPECT_EQ(stats.rows_written, 1);
   EXPECT_FALSE(std::filesystem::exists(output_path_));
+  EXPECT_FALSE(std::filesystem::exists(basic_output_path_));
 }
 
 TEST_F(DumpConverterTest, IgnoresEndOfStreamControlSymbolInAllMode) {
@@ -155,6 +238,7 @@ TEST_F(DumpConverterTest, TruncatedDumpDoesNotPublishOutputOrLeavePartial) {
 
   EXPECT_THROW((void)ConvertDump(MakeOptions()), std::runtime_error);
   EXPECT_FALSE(std::filesystem::exists(output_path_));
+  EXPECT_FALSE(std::filesystem::exists(basic_output_path_));
   for (const auto &entry : std::filesystem::directory_iterator(directory_)) {
     EXPECT_EQ(entry.path().filename().string().find(".partial."),
               std::string::npos);
@@ -168,6 +252,7 @@ TEST_F(DumpConverterTest, RejectsInvalidMessageChecksum) {
 
   EXPECT_THROW((void)ConvertDump(MakeOptions()), std::runtime_error);
   EXPECT_FALSE(std::filesystem::exists(output_path_));
+  EXPECT_FALSE(std::filesystem::exists(basic_output_path_));
 }
 
 TEST_F(DumpConverterTest, RefusesToOverwriteByDefault) {
@@ -179,6 +264,7 @@ TEST_F(DumpConverterTest, RefusesToOverwriteByDefault) {
   }
 
   EXPECT_THROW((void)ConvertDump(MakeOptions()), std::runtime_error);
+  EXPECT_FALSE(std::filesystem::exists(basic_output_path_));
   std::ifstream input(output_path_);
   std::string content;
   std::getline(input, content);
@@ -192,6 +278,10 @@ TEST_F(DumpConverterTest, OverwritesOnlyWhenExplicitlyRequested) {
     std::ofstream existing(output_path_);
     existing << "old\n";
   }
+  {
+    std::ofstream existing(basic_output_path_);
+    existing << "old-basic\n";
+  }
   auto options = MakeOptions();
   options.overwrite = true;
 
@@ -202,6 +292,10 @@ TEST_F(DumpConverterTest, OverwritesOnlyWhenExplicitlyRequested) {
   std::string header;
   std::getline(input, header);
   EXPECT_TRUE(header.starts_with("symbol,symbol_id,exchtime"));
+  std::ifstream basic_input(basic_output_path_);
+  std::string basic_header;
+  std::getline(basic_input, basic_header);
+  EXPECT_TRUE(basic_header.starts_with("trading_day,market,symbol"));
 }
 
 TEST_F(DumpConverterTest, RefusesDanglingPartialSymlink) {
@@ -214,8 +308,87 @@ TEST_F(DumpConverterTest, RefusesDanglingPartialSymlink) {
 
   EXPECT_THROW((void)ConvertDump(MakeOptions()), std::runtime_error);
   EXPECT_FALSE(std::filesystem::exists(output_path_));
+  EXPECT_FALSE(std::filesystem::exists(basic_output_path_));
   EXPECT_FALSE(std::filesystem::exists(symlink_target));
   EXPECT_TRUE(std::filesystem::is_symlink(partial_path));
+}
+
+TEST_F(DumpConverterTest, RefusesDanglingBasicInfoPartialSymlink) {
+  const auto dump = MakeStockDump();
+  test::WriteBinaryFile(dump_path_, dump);
+  auto partial_path = basic_output_path_;
+  partial_path += ".partial." + std::to_string(::getpid());
+  const auto symlink_target = directory_ / "outside-basic.csv";
+  std::filesystem::create_symlink(symlink_target, partial_path);
+
+  EXPECT_THROW((void)ConvertDump(MakeOptions()), std::runtime_error);
+  EXPECT_FALSE(std::filesystem::exists(output_path_));
+  EXPECT_FALSE(std::filesystem::exists(basic_output_path_));
+  EXPECT_FALSE(std::filesystem::exists(symlink_target));
+  EXPECT_TRUE(std::filesystem::is_symlink(partial_path));
+  auto depth_partial_path = output_path_;
+  depth_partial_path += ".partial." + std::to_string(::getpid());
+  EXPECT_FALSE(std::filesystem::exists(depth_partial_path));
+}
+
+TEST_F(DumpConverterTest, OddLotModeDoesNotCreateStateFromFormat1) {
+  const auto dump = MakeStockDump();
+  test::WriteBinaryFile(dump_path_, dump);
+  auto options = MakeOptions();
+  options.symbol_filter_mode = SymbolFilterMode::kOddLot;
+  options.dry_run = true;
+
+  const auto stats = ConvertDump(options);
+
+  EXPECT_EQ(stats.basic_info_rows, 1);
+  EXPECT_EQ(stats.symbols_seen, 0);
+  EXPECT_EQ(stats.rows_written, 0);
+}
+
+TEST_F(DumpConverterTest, ChangedBasicInfoKeepsBothExistingOutputs) {
+  std::vector<std::uint8_t> dump;
+  auto basic = test::MakeStockBasic("2330", 900000, 990000, 810000);
+  test::AppendMessage(dump, MessageType::kStockBasicInfo, basic, 1);
+  basic = test::MakeStockBasic("2330", 910000, 990000, 810000);
+  test::AppendMessage(dump, MessageType::kStockBasicInfo, basic, 2);
+  test::WriteBinaryFile(dump_path_, dump);
+  {
+    std::ofstream existing(output_path_);
+    existing << "old-depth\n";
+  }
+  {
+    std::ofstream existing(basic_output_path_);
+    existing << "old-basic\n";
+  }
+  auto options = MakeOptions();
+  options.overwrite = true;
+
+  EXPECT_THROW((void)ConvertDump(options), std::runtime_error);
+
+  std::ifstream depth_input(output_path_);
+  std::string depth_content;
+  std::getline(depth_input, depth_content);
+  EXPECT_EQ(depth_content, "old-depth");
+  std::ifstream basic_input(basic_output_path_);
+  std::string basic_content;
+  std::getline(basic_input, basic_content);
+  EXPECT_EQ(basic_content, "old-basic");
+}
+
+TEST_F(DumpConverterTest, NeverReplacesAnOutputDirectory) {
+  const auto dump = MakeStockDump();
+  test::WriteBinaryFile(dump_path_, dump);
+  std::filesystem::create_directory(basic_output_path_);
+  auto options = MakeOptions();
+  options.overwrite = true;
+
+  EXPECT_THROW((void)ConvertDump(options), std::runtime_error);
+  EXPECT_FALSE(std::filesystem::exists(output_path_));
+  EXPECT_TRUE(std::filesystem::is_directory(basic_output_path_));
+  for (const auto &entry : std::filesystem::directory_iterator(directory_)) {
+    EXPECT_EQ(entry.path().filename().string().find(".partial."),
+              std::string::npos);
+  }
 }
 
 } // namespace

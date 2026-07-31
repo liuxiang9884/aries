@@ -21,6 +21,7 @@ set_tests_properties(
 
 add_executable(
     twse_converter_tests
+    data/converter/twse/basic_info_test.cpp
     data/converter/twse/bcd_decoder_test.cpp
     data/converter/twse/dump_converter_test.cpp
     data/converter/twse/message_decoder_test.cpp

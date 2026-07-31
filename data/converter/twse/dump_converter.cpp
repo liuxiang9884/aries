@@ -11,6 +11,7 @@
 
 #include <fmt/format.h>
 
+#include "data/converter/twse/basic_info.h"
 #include "data/converter/twse/csv_writer.h"
 #include "data/converter/twse/protocol.h"
 
@@ -35,8 +36,17 @@ void ValidateFrame(std::span<const std::uint8_t> raw_header,
     checksum ^= byte;
   }
   if (checksum != body[body.size() - protocol::kMessageTrailerSize]) {
-    throw std::runtime_error("TWSE message has invalid checksum");
+    throw std::runtime_error(fmt::format(
+        "TWSE message has invalid checksum expected=0x{:02x} actual=0x{:02x}",
+        checksum, body[body.size() - protocol::kMessageTrailerSize]));
   }
+}
+
+std::string HeaderContext(const MessageHeader &header) {
+  return fmt::format("service={} format={} version={} sequence={}",
+                     static_cast<unsigned>(header.service_type),
+                     static_cast<unsigned>(header.message_type),
+                     header.format_version, header.sequence);
 }
 
 } // namespace
@@ -48,12 +58,24 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
   if (!options.dry_run && options.output_path.empty()) {
     throw std::invalid_argument("output path is required without --dry-run");
   }
+  if (!options.dry_run && options.basic_output_path.empty()) {
+    throw std::invalid_argument(
+        "basic-info output path is required without --dry-run");
+  }
+  if (!options.dry_run && options.output_path.lexically_normal() ==
+                              options.basic_output_path.lexically_normal()) {
+    throw std::invalid_argument("depth and basic-info outputs must differ");
+  }
 
   MessageDecoder decoder(options.trading_day, options.symbol_filter_mode);
-  std::unique_ptr<LegacyCsvWriter> writer;
+  BasicInfoCatalog basic_info_catalog(options.trading_day);
+  std::unique_ptr<LegacyCsvWriter> depth_writer;
+  std::unique_ptr<BasicInfoCsvWriter> basic_info_writer;
   if (!options.dry_run) {
-    writer = std::make_unique<LegacyCsvWriter>(options.output_path,
-                                               options.overwrite);
+    depth_writer = std::make_unique<LegacyCsvWriter>(options.output_path,
+                                                     options.overwrite);
+    basic_info_writer = std::make_unique<BasicInfoCsvWriter>(
+        options.basic_output_path, options.overwrite);
   }
 
   std::ifstream input;
@@ -81,36 +103,64 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
           fmt::format("truncated TWSE header at byte {}", offset));
     }
 
+    MessageHeader header;
     try {
-      const auto header = DecodeMessageHeader(raw_header);
+      header = DecodeMessageHeader(raw_header);
+    } catch (const std::exception &error) {
+      throw std::runtime_error(
+          fmt::format("TWSE message at byte {}: {}", offset, error.what()));
+    }
+
+    try {
       const auto body_size = header.message_length - protocol::kHeaderSize;
       body.resize(body_size);
       input.read(reinterpret_cast<char *>(body.data()),
                  static_cast<std::streamsize>(body.size()));
       if (input.gcount() != static_cast<std::streamsize>(body.size())) {
-        throw std::runtime_error("truncated TWSE message body");
+        throw std::runtime_error(
+            fmt::format("truncated TWSE message body expected={} actual={}",
+                        body.size(), input.gcount()));
       }
       ValidateFrame(raw_header, body);
 
-      const auto *record = decoder.Process(header, body);
+      const DepthRecord *record = nullptr;
+      if (header.message_type == MessageType::kStockBasicInfo) {
+        const auto *basic_info =
+            basic_info_catalog.Process(header, body, offset);
+        if (basic_info != nullptr &&
+            options.symbol_filter_mode != SymbolFilterMode::kOddLot) {
+          decoder.ApplyBasicInfo(*basic_info);
+        }
+      } else {
+        record = decoder.Process(header, body);
+      }
       ++stats.messages_read;
       if (record != nullptr) {
         ++stats.rows_written;
-        if (writer != nullptr) {
-          writer->Write(*record);
+        if (depth_writer != nullptr) {
+          depth_writer->Write(*record);
         }
       }
       offset += header.message_length;
       stats.bytes_read = offset;
     } catch (const std::exception &error) {
-      throw std::runtime_error(
-          fmt::format("TWSE message at byte {}: {}", offset, error.what()));
+      throw std::runtime_error(fmt::format("TWSE message at byte {} {}: {}",
+                                           offset, HeaderContext(header),
+                                           error.what()));
     }
   }
 
   stats.symbols_seen = decoder.symbol_count();
-  if (writer != nullptr) {
-    writer->Commit();
+  stats.basic_info_messages = basic_info_catalog.normal_messages();
+  stats.basic_info_controls = basic_info_catalog.control_records();
+  stats.basic_info_duplicates = basic_info_catalog.identical_duplicates();
+  const auto basic_info_records = basic_info_catalog.records();
+  stats.basic_info_rows = basic_info_records.size();
+  if (basic_info_writer != nullptr) {
+    for (const auto &record : basic_info_records) {
+      basic_info_writer->Write(record);
+    }
+    CsvOutputTransaction::Commit(*depth_writer, *basic_info_writer);
   }
   return stats;
 }

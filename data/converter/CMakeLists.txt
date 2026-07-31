@@ -3,6 +3,7 @@ find_package(fmt CONFIG REQUIRED)
 
 add_library(
     aries_twse_converter
+    twse/basic_info.cpp
     twse/bcd_decoder.cpp
     twse/csv_writer.cpp
     twse/dump_converter.cpp
@@ -34,7 +35,7 @@ target_link_libraries(
         aries::project_options
         aries_twse_converter
         CLI11::CLI11
-        fmt::fmt
+        nova
 )
 
 if(BUILD_TESTING)

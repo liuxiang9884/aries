@@ -6,7 +6,9 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
+#include "data/converter/twse/basic_info.h"
 #include "data/converter/twse/depth_record.h"
 #include "data/converter/twse/protocol.h"
 
@@ -39,6 +41,8 @@ public:
   [[nodiscard]] const DepthRecord *Process(const MessageHeader &header,
                                            std::span<const std::uint8_t> body);
 
+  void ApplyBasicInfo(const BasicInfoRecord &basic_info);
+
   [[nodiscard]] std::size_t symbol_count() const noexcept {
     return records_.size();
   }
@@ -57,8 +61,10 @@ private:
                bool odd_lot, bool emit);
 
   std::int64_t trading_day_start_ns_;
+  std::int32_t trading_day_;
   SymbolFilterMode mode_;
   std::unordered_map<std::string, DepthRecord> records_;
+  std::unordered_set<std::string> warrant_symbols_;
 };
 
 } // namespace aries::data::twse
