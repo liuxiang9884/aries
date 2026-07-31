@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+DEFAULT_DOWNLOADER="$SCRIPT_DIR/synology-pull"
+if [ ! -x "$DEFAULT_DOWNLOADER" ]; then
+    DEFAULT_DOWNLOADER="$HOME/.local/bin/synology-pull"
+fi
+
+DOWNLOADER="${SYNOLOGY_PULL_BIN:-$DEFAULT_DOWNLOADER}"
+DSM_URL="${SYNOLOGY_URL:-}"
+DSM_USER="${SYNOLOGY_USER:-}"
+PASSWORD_FILE="${SYNOLOGY_PASSWORD_FILE:-$HOME/.config/synology-pull/password}"
+DEST_ROOT="${SYNOLOGY_DEST_ROOT:-/data/tw/raw}"
+STATE_DIR="${SYNOLOGY_STATE_DIR:-$HOME/.local/state/synology-pull}"
+RETRY_DELAY_SECONDS="${RETRY_DELAY_SECONDS:-300}"
+MAX_RETRIES="${MAX_RETRIES:-0}"
+MIN_FREE_BYTES="${MIN_FREE_BYTES:-10737418240}"
+TODAY_TZ="${TODAY_TZ:-Asia/Taipei}"
+
+usage() {
+    cat <<'EOF'
+Usage:
+  pull-tw-raw --type future [--start-date YYYYMMDD] [--end-date YYYYMMDD]
+  pull-tw-raw --type stock  [--start-date YYYYMMDD] [--end-date YYYYMMDD]
+  pull-tw-raw --type future --today
+
+Options:
+  --type TYPE          Data type to pull: future or stock.
+  --start-date DATE    Inclusive start date in YYYYMMDD. Omit with --end-date for full start.
+  --end-date DATE      Inclusive end date in YYYYMMDD. Omit with --start-date for open end.
+  --today              Pull only today's file, using Asia/Taipei by default.
+  -h, --help           Show this help.
+
+Environment:
+  SYNOLOGY_PULL_BIN       Downloader path. Default: sibling synology-pull, then ~/.local/bin/synology-pull
+  SYNOLOGY_URL            DSM HTTPS base URL. Required.
+  SYNOLOGY_USER           DSM user. Required.
+  SYNOLOGY_PASSWORD_FILE  Password file. Default: ~/.config/synology-pull/password
+  SYNOLOGY_DEST_ROOT      Destination root. Default: /data/tw/raw
+  TODAY_TZ                Time zone for --today. Default: Asia/Taipei
+EOF
+}
+
+timestamp() {
+    date --iso-8601=seconds
+}
+
+fail() {
+    printf '%s ERROR %s\n' "$(timestamp)" "$*" >&2
+    exit 1
+}
+
+valid_date() {
+    local value="$1"
+    [[ "$value" =~ ^[0-9]{8}$ ]] || return 1
+    local normalized
+    normalized="$(date -d "${value:0:4}-${value:4:2}-${value:6:2}" +%Y%m%d 2>/dev/null)" || return 1
+    [ "$normalized" = "$value" ]
+}
+
+DATA_TYPE=""
+START_DATE=""
+END_DATE=""
+TODAY_ONLY=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --type|--dataset)
+            [ "$#" -ge 2 ] || fail "$1 requires a value"
+            DATA_TYPE="$2"
+            shift 2
+            ;;
+        --start-date)
+            [ "$#" -ge 2 ] || fail "$1 requires a value"
+            START_DATE="$2"
+            shift 2
+            ;;
+        --end-date)
+            [ "$#" -ge 2 ] || fail "$1 requires a value"
+            END_DATE="$2"
+            shift 2
+            ;;
+        --today)
+            TODAY_ONLY=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            if [ -z "$DATA_TYPE" ] && [[ "$1" != -* ]]; then
+                DATA_TYPE="$1"
+                shift
+            else
+                fail "Unknown argument: $1"
+            fi
+            ;;
+    esac
+done
+
+[ -n "$DATA_TYPE" ] || fail "Missing --type. Use future or stock."
+
+if [ "$TODAY_ONLY" -eq 1 ] && { [ -n "$START_DATE" ] || [ -n "$END_DATE" ]; }; then
+    fail "--today cannot be combined with --start-date or --end-date"
+fi
+
+if [ "$TODAY_ONLY" -eq 1 ]; then
+    START_DATE="$(TZ="$TODAY_TZ" date +%Y%m%d)" || fail "Cannot compute today's date"
+    END_DATE="$START_DATE"
+fi
+
+if [ -n "$START_DATE" ] && ! valid_date "$START_DATE"; then
+    fail "--start-date must be a valid YYYYMMDD date"
+fi
+if [ -n "$END_DATE" ] && ! valid_date "$END_DATE"; then
+    fail "--end-date must be a valid YYYYMMDD date"
+fi
+if [ -n "$START_DATE" ] && [ -n "$END_DATE" ] && [[ "$START_DATE" > "$END_DATE" ]]; then
+    fail "--start-date must not be after --end-date"
+fi
+
+case "$DATA_TYPE" in
+    future|futures)
+        DATA_KEY="future"
+        REMOTE_PATH="${SYNOLOGY_SOURCE_FUTURE:-/taiwan_stock/FubunData/future_tick_raw}"
+        DESTINATION="${SYNOLOGY_DEST_FUTURE:-$DEST_ROOT/future}"
+        FILE_PATTERN="taifex_*.dump.tar.gz"
+        ;;
+    stock|stocks)
+        DATA_KEY="stock"
+        REMOTE_PATH="${SYNOLOGY_SOURCE_STOCK:-/taiwan_stock/FubunData/stock_tick_raw}"
+        DESTINATION="${SYNOLOGY_DEST_STOCK:-$DEST_ROOT/stock}"
+        FILE_PATTERN="twse_stock_*.dump.tar.gz"
+        ;;
+    *)
+        fail "Unsupported data type: $DATA_TYPE"
+        ;;
+esac
+
+case "$RETRY_DELAY_SECONDS:$MAX_RETRIES:$MIN_FREE_BYTES" in
+    *[!0-9:]*)
+        fail "Retry and disk-space settings must be non-negative integers"
+        ;;
+esac
+
+command -v flock >/dev/null 2>&1 || fail "flock is not installed"
+[ -x "$DOWNLOADER" ] || fail "Downloader is not executable: $DOWNLOADER"
+[ -n "$DSM_URL" ] || fail "SYNOLOGY_URL is required"
+[ -n "$DSM_USER" ] || fail "SYNOLOGY_USER is required"
+[ -f "$PASSWORD_FILE" ] || fail "Password file does not exist: $PASSWORD_FILE"
+
+password_mode="$(stat -c '%a' "$PASSWORD_FILE")" || fail "Cannot stat password file"
+if (( (8#$password_mode) & 077 )); then
+    fail "Password file permissions must be 0600 or stricter, found $password_mode"
+fi
+
+mkdir -p "$DESTINATION" "$STATE_DIR" || fail "Cannot create destination/state directory"
+
+LOCK_FILE="$STATE_DIR/${DATA_KEY}_raw.lock"
+PID_FILE="$STATE_DIR/${DATA_KEY}_raw.pid"
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    printf '%s INFO another %s download is already running\n' "$(timestamp)" "$DATA_KEY"
+    exit 75
+fi
+
+printf '%s\n' "$$" >"$PID_FILE"
+trap 'rm -f "$PID_FILE"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+printf '%s INFO starting type=%s source=%s destination=%s start_date=%s end_date=%s\n' \
+    "$(timestamp)" "$DATA_KEY" "$REMOTE_PATH" "$DESTINATION" \
+    "${START_DATE:-full}" "${END_DATE:-full}"
+
+failures=0
+while true; do
+    available_bytes="$(df -PB1 "$DESTINATION" | awk 'END {print $4}')"
+    if [ -z "$available_bytes" ] || [ "$available_bytes" -lt "$MIN_FREE_BYTES" ]; then
+        fail "Less than $MIN_FREE_BYTES bytes are available at $DESTINATION"
+    fi
+
+    pull_args=(
+        --timeout 600
+        --url "$DSM_URL"
+        --user "$DSM_USER"
+        --password-file "$PASSWORD_FILE"
+        pull
+    )
+    [ -n "$START_DATE" ] && pull_args+=(--start-date "$START_DATE")
+    [ -n "$END_DATE" ] && pull_args+=(--end-date "$END_DATE")
+    pull_args+=("$REMOTE_PATH" "$DESTINATION")
+
+    if "$DOWNLOADER" "${pull_args[@]}"; then
+        file_count="$(find "$DESTINATION" -maxdepth 1 -type f -name "$FILE_PATTERN" | wc -l)"
+        total_bytes="$(du -sb "$DESTINATION" | awk '{print $1}')"
+        printf '%s INFO completed type=%s files=%s bytes=%s\n' \
+            "$(timestamp)" "$DATA_KEY" "$file_count" "$total_bytes"
+        exit 0
+    else
+        rc=$?
+    fi
+
+    failures=$((failures + 1))
+    printf '%s WARN download exited type=%s rc=%s failure=%s\n' \
+        "$(timestamp)" "$DATA_KEY" "$rc" "$failures" >&2
+
+    if [ "$MAX_RETRIES" -gt 0 ] && [ "$failures" -ge "$MAX_RETRIES" ]; then
+        printf '%s ERROR retry limit reached\n' "$(timestamp)" >&2
+        exit "$rc"
+    fi
+
+    printf '%s INFO retrying in %s seconds\n' \
+        "$(timestamp)" "$RETRY_DELAY_SECONDS"
+    sleep "$RETRY_DELAY_SECONDS"
+done
