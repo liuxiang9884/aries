@@ -1,6 +1,6 @@
 # Data 模块 Onboarding
 
-更新时间：2026-07-31
+更新时间：2026-08-01
 
 ## 模块职责
 
@@ -10,9 +10,9 @@
 
 - 台湾 raw 数据通过 `scripts/` 下载到仓库外目录，支持断点续传和 cron 调度。
 - 2026-07-07 TAIFEX 与 TWSE dump 已由 Orion 转换为 legacy CSV 并记录校验摘要。
-- Aries 已实现 TWSE / TPEx converter 的 legacy depth CSV 和 format1 basic-info
-  CSV contract；尚未建立版本化的完整行情研究 schema、manifest 或统一存储目录
-  contract。
+- Aries 已实现 TWSE / TPEx converter 的 legacy depth/basic-info contract，以及
+  TAIFEX 全 futures 45 列 depth 与 27 列 basic-info research schema；尚未建立统一
+  manifest、跨市场 schema version 或夜盘交易日历 contract。
 
 ## 关键入口
 
@@ -39,8 +39,8 @@
 
 ## 下一步
 
-在 converter 工作完成后，统一 raw、dump、CSV 与后续研究数据的目录和版本规则，
-并建立第一版 manifest。
+统一 raw、dump、CSV 与后续研究数据的目录和版本规则，建立第一版 manifest，并在
+批量 TAIFEX 转换前锁定夜盘 timestamp 映射。
 
 ## 按需阅读
 

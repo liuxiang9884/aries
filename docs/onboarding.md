@@ -1,6 +1,6 @@
 # Aries 全局 Onboarding
 
-更新时间：2026-07-31
+更新时间：2026-08-01
 
 ## 项目职责
 
@@ -11,9 +11,9 @@
 
 - 根 CMake、preset 和 vcpkg manifest 已提供统一的 configure、build 与 CTest
   入口。
-- 数据模块已具备台湾 raw 数据下载工具；TWSE / TPEx dump converter 可同时生成
-  Orion-compatible depth CSV 与去重后的 format1 basic-info CSV。TAIFEX converter
-  仍是待提取骨架。
+- 数据模块已具备台湾 raw 数据下载工具；TWSE / TPEx converter 可生成
+  Orion-compatible depth 与 format1 basic-info CSV；TAIFEX converter 可同步生成
+  全 futures research depth 与 basic-info CSV，且已完成 2026-07-07 真实数据验证。
 - 因子、回测、模型和研究模块目前只有目录骨架，尚无正式行为 contract。
 - 大体积 raw、CSV、临时转换结果和实验产物均保存在仓库外。
 
@@ -54,8 +54,8 @@ VCPKG_ROOT=/home/liuxiang/vcpkg ctest --preset debug
 
 ## 下一步
 
-按同级结构提取 TAIFEX dump converter，并在实现 volume / multiplier contract
-时与 TWSE 已解析的 `multiplier` 一起审查统一口径。
+在批量生成其余 TAIFEX CSV 前，建立夜盘自然日映射与数据 manifest/version
+contract；converter 的当前日盘结果和边界由模块文档维护。
 
 ## 按需阅读
 
