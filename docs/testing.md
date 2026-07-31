@@ -1,12 +1,12 @@
 # 验证说明
 
-更新时间：2026-07-31T17:05:05+08:00
+更新时间：2026-07-31T17:31:34+08:00
 
 ## 基础检查
 
-当前仓库尚未建立 Python package、converter 业务 target、通用数据校验框架、
-回测 smoke 或模型训练入口。根 CMake 工程已经建立，并通过 CTest 注册现有
-`tests/test_synology_pull.py`。提交前至少执行：
+当前仓库尚未建立 Python package、通用数据校验框架、回测 smoke 或模型训练
+入口。根 CMake 工程通过 CTest 注册 Synology 下载测试和 TWSE converter
+focused tests。提交前至少执行：
 
 ```bash
 git status --short --branch
@@ -87,6 +87,47 @@ gzip -t /data/tw/raw/stock/twse_stock_YYYYMMDD.dump.tar.gz
 ```
 
 ## Dump 转 CSV 检查
+
+TWSE converter focused tests：
+
+```bash
+export VCPKG_ROOT=/home/liuxiang/vcpkg
+
+cmake --build --preset debug --target twse_converter_tests
+ctest --test-dir build/debug \
+  --output-on-failure \
+  -R '^(BcdDecoderTest|MessageDecoderTest|DumpConverterTest)'
+```
+
+测试覆盖：
+
+- BCD integer、decimal、exchange time 和非法 digit / time。
+- header、format 1 / 6 / 17 / 22 / 23、五种 filter mode 和 UTC+8
+  `trading_day`。
+- 非法日期、short body、超过五档、截断 dump 和结束控制 symbol。
+- legacy CSV 内容、dry-run、默认拒绝覆盖、partial symlink 防护和原子发布。
+
+完整 dump 可先 dry-run：
+
+```bash
+./build/release/data/converter/twse_dump_converter \
+  --dump /home/liuxiang/data/raw/stock/twse_stock_20260707.dump \
+  --trading-day 20260707 \
+  --symbol-filter-mode stock \
+  --dry-run
+```
+
+完整兼容性验证应写入 `/home/liuxiang/tmp`，再与 Orion 基准比较：
+
+```bash
+sha256sum \
+  /home/liuxiang/tmp/<run>/twse_stock_20260707.csv \
+  /home/liuxiang/data/csv/stock/twse_stock_20260707.csv
+
+cmp \
+  /home/liuxiang/tmp/<run>/twse_stock_20260707.csv \
+  /home/liuxiang/data/csv/stock/twse_stock_20260707.csv
+```
 
 一次性转换至少记录输入、工具版本、config、输出路径、bytes、数据行数、列数、
 时间范围和 SHA-256。本轮 2026-07-07 的结果与边界见 `docs/data.md`。

@@ -25,5 +25,30 @@ cmake --preset debug \
 仓库提交 `CMakePresets.json` 和 `vcpkg.json`；机器专用设置应写入未跟踪的
 `CMakeUserPresets.json`，不要写入公共 CMake 文件。
 
-当前 CMake 工程只建立公共构建、依赖和测试入口，尚未包含 TWSE 或 TAIFEX
-converter 实现。
+## TWSE Dump 转换
+
+`twse_dump_converter` 将 TWSE BCD dump 转成 Orion 兼容的 23 列 legacy
+CSV。当前支持 format 1、6、17、22、23，以及 `stock`、`etf`、
+`warrant`、`odd_lot`、`all` 五种 filter mode：
+
+```bash
+./build/release/data/converter/twse_dump_converter \
+  --dump /path/to/twse_stock_20260707.dump \
+  --output /path/to/twse_stock_20260707.csv \
+  --trading-day 20260707 \
+  --symbol-filter-mode stock
+```
+
+只解码和校验、不生成 CSV：
+
+```bash
+./build/release/data/converter/twse_dump_converter \
+  --dump /path/to/twse_stock_20260707.dump \
+  --trading-day 20260707 \
+  --symbol-filter-mode stock \
+  --dry-run
+```
+
+转换默认拒绝覆盖已有文件；明确传入 `--overwrite` 才允许成功后原子替换。
+schema、时间语义、Orion 兼容性结果和测试入口分别见
+`docs/data.md`、`docs/testing.md`。TAIFEX converter 尚未提取。

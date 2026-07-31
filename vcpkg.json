@@ -5,6 +5,7 @@
   "dependencies": [
     "cli11",
     "fmt",
+    "gtest",
     "magic-enum",
     "nameof",
     "quill",

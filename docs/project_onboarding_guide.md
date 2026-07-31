@@ -1,6 +1,6 @@
 # Aries 项目接手指南
 
-更新时间：2026-07-31T17:05:05+08:00
+更新时间：2026-07-31T17:31:34+08:00
 
 ## 当前仓库状态
 
@@ -8,8 +8,9 @@
 - 当前已提交的顶层模块目录：`data/`、`factors/`、`models/`、`backtest/`、`research/`、`configs/`、`tests/`、`docs/`。
 - 根 `CMakeLists.txt`、`CMakePresets.json` 和 `vcpkg.json` 提供统一的
   configure、build、CTest 和依赖入口；机器专用路径不写入公共 CMake。
-- `data/converter/` 已建立 `twse/` 与 `taifex/` 目录骨架，头文件与实现文件
-  后续共同放在对应市场目录，不增加语言、`include/` 或 `src/` 层。
+- `data/converter/twse/` 已包含 BCD、message decoder、state、legacy CSV
+  writer、dump framing 和 `twse_dump_converter` CLI；头文件与实现文件在
+  同一目录。`data/converter/taifex/` 仍是待提取骨架。
 - `README.md` 记录当前构建入口和本地 Nova source override 用法。
 - `scripts/` 提供台湾 raw 数据 NAS 下载入口和使用说明；
   `tests/test_synology_pull.py` 覆盖关键续传与配置边界。
@@ -44,6 +45,9 @@
   - `/home/liuxiang/data/csv/stock/twse_stock_20260707.csv`
 - 输出 bytes、数据行、列数、时间范围、SHA-256、实际 config 和转换命令见
   `docs/data.md`。这些 CSV 尚未纳入正式版本化数据 contract。
+- Aries TWSE converter 对完整 2026-07-07 stock dump 读取 25,993,761 条
+  message，生成 15,886,026 条数据行；输出 bytes、SHA-256 与 Orion CSV
+  完全相同，`cmp` 返回 0。
 
 ## 外部依赖状态
 
@@ -72,15 +76,16 @@ scripts/pull-tw-raw --help
 scripts/synology-pull --help
 ```
 
-当前没有 Python package、converter 业务 target、回测 smoke 或模型训练入口。
-新增数据、因子、模型或回测逻辑时，需要同步建立对应最小测试、fixture、
-dry-run 或 smoke。
+当前没有 Python package、回测 smoke 或模型训练入口。TWSE converter 已有
+GoogleTest synthetic fixtures、malformed input tests、CLI smoke、dry-run
+和完整文件兼容性证据。新增数据、因子、模型或回测逻辑时，需要同步建立对应
+最小测试、fixture、dry-run 或 smoke。
 
 ## 下一步建议
 
-- 在 `data/converter/twse/` 中提取 Orion 的 TWSE BCD protocol、message
-  decoder、dump converter 和 CSV writer，先建立小样本 fixture 和失败测试，
-  再增加 `aries_twse_converter` library 与 CLI target。
+- 按 `data/converter/twse/` 的同级结构提取 Orion TAIFEX dump converter，
+  先锁定其 40 列 legacy schema、消息类型和时间语义，再建立小样本 fixture、
+  失败边界与 2026-07-07 完整 CSV 兼容性验证。
 - 明确 `/data/tw/raw`、`/home/liuxiang/data/raw` 和
   `/home/liuxiang/data/csv` 的角色、生命周期与版本规则，再建立第一版
   manifest。

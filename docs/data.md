@@ -1,13 +1,13 @@
 # 数据说明
 
-更新时间：2026-07-31T15:42:19+08:00
+更新时间：2026-07-31T17:31:34+08:00
 
 ## 当前范围
 
-当前已有工作集中在台湾 raw 行情下载、本地落盘和 2026-07-07 dump 到
-CSV 的一次性转换。仓库尚未建立正式数据 schema、manifest、分区格式、
-质量检查报告或转换后的研究数据集 contract；本页记录的是当前操作事实，
-不能替代后续数据 contract。
+当前已有工作集中在台湾 raw 行情下载、本地落盘、TWSE dump converter，
+以及 2026-07-07 dump 到 CSV 的兼容性验证。仓库尚未建立正式版本化 schema、
+manifest、分区格式或通用质量检查报告；当前 converter 生成的是 Orion
+兼容的 legacy CSV，不能替代后续研究数据 contract。
 
 ## NAS Raw 下载
 
@@ -49,7 +49,7 @@ CSV 的一次性转换。仓库尚未建立正式数据 schema、manifest、分�
 
 ## 当前本地数据快照
 
-截至 2026-07-31T15:42:19+08:00：
+截至 2026-07-31T17:31:34+08:00：
 
 ```text
 /data/tw/raw/future/taifex_20260729.dump.tar.gz
@@ -67,6 +67,64 @@ CSV 的一次性转换。仓库尚未建立正式数据 schema、manifest、分�
 | future | `/data/tw/raw/future/taifex_20260731.dump.tar.gz` | 938,635,037 |
 | stock | `/data/tw/raw/stock/twse_stock_20260731.dump.tar.gz` | 508,095,091 |
 
+## TWSE Dump Converter
+
+实现入口：
+
+```text
+data/converter/twse/
+tests/data/converter/twse/
+```
+
+`twse_dump_converter` 从 dump 连续读取 10-byte header 和
+`message_length - 10` byte body，只处理 Orion offline converter 当前使用的
+消息：
+
+| format | 含义 | 处理方式 |
+|---:|---|---|
+| 1 | stock basic info | 更新昨收、涨停、跌停 |
+| 6 | stock depth | 更新五档与成交状态；按 mode 决定是否输出 |
+| 17 | warrant depth | 复用标准 depth 解码；`warrant` mode 输出 |
+| 22 | odd-lot basic info | `odd_lot` mode 更新基础状态 |
+| 23 | odd-lot depth | `odd_lot` mode 输出 |
+
+filter mode 为 `stock`、`etf`、`warrant`、`odd_lot`、`all`。为了保持 Orion
+兼容性，`stock` 沿用其四字符 symbol 判断，因此也会接受四字符 ETF；
+format 6 末尾 symbol 为 `000000`、时间为 `999999999999` 的结束控制消息会
+在所有 mode 中忽略。
+
+各 mode 沿用 Orion 当前输出路径，不把不同 format 自动合并：
+
+| mode | 输出 |
+|---|---|
+| `stock` | format 6 中符合四字符判断的 symbol |
+| `etf` | format 6 中符合 ETF 规则的 symbol |
+| `warrant` | format 17；format 6 只更新同 symbol 状态 |
+| `odd_lot` | format 23 |
+| `all` | format 6 的全部非控制 symbol |
+
+CSV 固定为以下 23 列：
+
+```text
+symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,
+ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,
+ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,
+total_volume,total_value,status,sequence
+```
+
+数据和时间语义：
+
+- `trading_day` 按 UTC+8 自然日零点计算，不依赖进程时区；消息中的 BCD
+  `HHMMSSmmmuuu` 是当日偏移。
+- offline `symbol_id` 固定为 `-1`，`localtime` 等于 `exchtime`。
+- price 和 `total_value` 使用两位小数；五档 volume 参与内部状态更新，但
+  Orion legacy CSV 不包含对应列。
+- 每个 symbol 跨消息保存 high / low limit、open、last、累计 volume 和
+  Orion 当前增量口径的 `total_value`。
+- 非法 BCD、非法 message length、截断、非法 trailer 或超过五档会终止
+  转换。CSV 写入同目录 `.partial.<pid>`，成功 flush / close 后才 rename；
+  默认拒绝覆盖，`--overwrite` 显式允许替换。
+
 ## 2026-07-07 Dump 转 CSV
 
 输入 dump：
@@ -76,7 +134,7 @@ CSV 的一次性转换。仓库尚未建立正式数据 schema、manifest、分�
 /home/liuxiang/data/raw/stock/twse_stock_20260707.dump
 ```
 
-转换使用 `/home/liuxiang/dev/orion` 的 `main` 提交
+基准转换使用 `/home/liuxiang/dev/orion` 的 `main` 提交
 `4282286 Merge pull request #66 from dcfintech/validation/future-spot-arbitrage-native-x86`
 及其 `build/debug` 工具。实际 scratch config 和日志保留在：
 
@@ -127,10 +185,30 @@ cd /home/liuxiang/dev/orion
   `1783384200073709000` 至 `1783402380000000000`。
 - 两份文件发布后重新计算 SHA-256，结果见上表。
 
+Aries converter 使用相同 stock dump 和 `trading_day = 20260707` 做完整
+转换：
+
+```bash
+./build/release/data/converter/twse_dump_converter \
+  --dump /home/liuxiang/data/raw/stock/twse_stock_20260707.dump \
+  --output /home/liuxiang/tmp/<run>/twse_stock_20260707.csv \
+  --trading-day 20260707 \
+  --symbol-filter-mode stock
+```
+
+读取 25,993,761 条 message、输出 15,886,026 条数据行、维护 1,979 个
+symbol，共读取 3,153,093,917 bytes。Aries 输出与 Orion 正式输出均为
+2,742,684,274 bytes，SHA-256 均为
+`f5981991517c24d07fbe4ee2ef38d9b9d3d198b69d2c841cdab39d5a8cb3cc41`，
+`cmp` 返回 0。完整 dump 的其余四种 filter mode 也已通过 dry-run；该 dump
+没有可供 `odd_lot` / `warrant` 输出的真实消息，因此这两种输出路径仍以
+synthetic fixture 为验证证据。
+
 ## 未完成事项
 
 - 为 raw、dump、csv、后续 parquet / binary 研究数据确定统一目录约定，避免 `/data/tw/raw` 与 `/home/liuxiang/data/raw` 长期并存而语义不清。
 - 建立数据 manifest：数据类型、交易日、来源、远端路径、本地路径、大小、hash、生成命令、生成时间和质量检查状态。
-- 把当前一次性 `orion` scratch config 收敛为仓库内可复用、可参数化且带
-  dry-run 的转换入口；在入口和输出 schema 锁定前，不把本轮 CSV 视为正式
-  版本化研究数据集。
+- 提取 TAIFEX dump converter，并以相同方式建立小样本 fixture、失败边界和
+  2026-07-07 完整文件兼容性证据。
+- 为 TWSE 设计包含 bid / ask volume 的正式版本化 schema；在 contract、
+  manifest 和迁移规则锁定前，不把 legacy CSV 当作正式研究数据集。
