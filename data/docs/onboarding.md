@@ -10,8 +10,9 @@
 
 - 台湾 raw 数据通过 `scripts/` 下载到仓库外目录，支持断点续传和 cron 调度。
 - 2026-07-07 TAIFEX 与 TWSE dump 已由 Orion 转换为 legacy CSV 并记录校验摘要。
-- Aries 已实现 TWSE / TPEx converter；尚未建立正式版本化研究 schema、manifest
-  或统一存储目录 contract。
+- Aries 已实现 TWSE / TPEx converter 的 legacy depth CSV 和 format1 basic-info
+  CSV contract；尚未建立版本化的完整行情研究 schema、manifest 或统一存储目录
+  contract。
 
 ## 关键入口
 

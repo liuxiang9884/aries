@@ -27,14 +27,15 @@ cmake --preset debug \
 
 ## TWSE Dump 转换
 
-`twse_dump_converter` 将 TWSE BCD dump 转成 Orion 兼容的 23 列 legacy
-CSV。当前支持 format 1、6、17、22、23，以及 `stock`、`etf`、
-`warrant`、`odd_lot`、`all` 五种 filter mode：
+`twse_dump_converter` 将 TWSE BCD dump 同时转成 Orion 兼容的 23 列 depth
+CSV 和 30 列 format1 basic-info CSV。当前支持 format 1、6、17、22、23，
+以及 `stock`、`etf`、`warrant`、`odd_lot`、`all` 五种 filter mode：
 
 ```bash
 ./build/release/data/converter/twse_dump_converter \
   --dump /path/to/twse_stock_20260707.dump \
   --output /path/to/twse_stock_20260707.csv \
+  --basic-output /path/to/twse_basic_info_20260707.csv \
   --trading-day 20260707 \
   --symbol-filter-mode stock
 ```
@@ -49,7 +50,8 @@ CSV。当前支持 format 1、6、17、22、23，以及 `stock`、`etf`、
   --dry-run
 ```
 
-转换默认拒绝覆盖已有文件；明确传入 `--overwrite` 才允许成功后原子替换。
+非 dry-run 必须同时指定两个输出。转换默认拒绝覆盖已有文件；明确传入
+`--overwrite` 才允许在两份临时文件均成功后替换旧输出。
 schema 与时间语义见 `data/docs/data.md`，协议核对和 Orion 差异见
 `data/converter/docs/twse.md`，focused test 入口见
 `data/converter/docs/testing.md`。TAIFEX converter 尚未提取。

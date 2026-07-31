@@ -11,8 +11,9 @@
 
 - 根 CMake、preset 和 vcpkg manifest 已提供统一的 configure、build 与 CTest
   入口。
-- 数据模块已具备台湾 raw 数据下载工具和 TWSE / TPEx dump converter；TAIFEX
-  converter 仍是待提取骨架。
+- 数据模块已具备台湾 raw 数据下载工具；TWSE / TPEx dump converter 可同时生成
+  Orion-compatible depth CSV 与去重后的 format1 basic-info CSV。TAIFEX converter
+  仍是待提取骨架。
 - 因子、回测、模型和研究模块目前只有目录骨架，尚无正式行为 contract。
 - 大体积 raw、CSV、临时转换结果和实验产物均保存在仓库外。
 
@@ -53,8 +54,8 @@ VCPKG_ROOT=/home/liuxiang/vcpkg ctest --preset debug
 
 ## 下一步
 
-先完成 TWSE / TPEx converter 的协议问题审查，并实施经确认需要的修复，再按
-同级结构提取 TAIFEX dump converter。
+按同级结构提取 TAIFEX dump converter，并在实现 volume / multiplier contract
+时与 TWSE 已解析的 `multiplier` 一起审查统一口径。
 
 ## 按需阅读
 

@@ -6,8 +6,9 @@
 
 当前已有工作集中在台湾 raw 行情下载、本地落盘、TWSE dump converter，
 以及 2026-07-07 dump 到 CSV 的兼容性验证。仓库尚未建立正式版本化 schema、
-manifest、分区格式或通用质量检查报告；当前 converter 生成的是 Orion
-兼容的 legacy CSV，不能替代后续研究数据 contract。
+manifest、分区格式或通用质量检查报告；当前 converter 生成 Orion-compatible
+depth CSV 和 format1 basic-info CSV，仍不能替代版本化的完整行情研究数据
+contract。
 
 ## NAS Raw 下载
 
@@ -82,7 +83,7 @@ tests/data/converter/twse/
 
 | format | 含义 | 处理方式 |
 |---:|---|---|
-| 1 | stock basic info | 更新昨收、涨停、跌停 |
+| 1 | stock basic info | 更新 depth 状态，并进入去重后的 basic-info CSV |
 | 6 | stock depth | 更新五档与成交状态；按 mode 决定是否输出 |
 | 17 | warrant depth | 复用标准 depth 解码；`warrant` mode 输出 |
 | 22 | odd-lot basic info | `odd_lot` mode 更新基础状态 |
@@ -108,7 +109,7 @@ format 6 末尾 symbol 为 `000000`、时间为 `999999999999` 的结束控制�
 | `odd_lot` | format 23 |
 | `all` | format 6 的全部非控制 symbol |
 
-CSV 固定为以下 23 列：
+depth CSV 固定为以下 23 列：
 
 ```text
 symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,
@@ -116,6 +117,10 @@ ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,
 ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,
 total_volume,total_value,status,sequence
 ```
+
+format1 另生成 30 列 basic-info CSV，主键和排序键为
+`(trading_day, market, symbol)`；字段、类型、权证单位缩放和空值 contract 见
+`data/converter/docs/twse.md`。它不包含 Big5/CP950 证券名称。
 
 数据和时间语义：
 
@@ -127,9 +132,11 @@ total_volume,total_value,status,sequence
 - 每个 symbol 跨消息保存 high / low limit、open、last、累计 volume 和
   Orion 当前增量口径的 `total_value`。
 - 非法 service / format version / BCD / message length / checksum、截断、
-  非法 trailer 或超过五档会终止转换。CSV 写入同目录 `.partial.<pid>`，
-  成功 flush / close 后才 rename；默认拒绝覆盖，`--overwrite` 显式允许
-  替换。
+  非法 trailer 或超过五档会终止转换。
+- 非 dry-run 必须指定不同的 `--output` 与 `--basic-output`。两份 CSV 都先写
+  同目录 `.partial.<pid>`；成功 flush / close 后才进入发布。默认拒绝覆盖，
+  `--overwrite` 会在进程内发布失败时恢复两份旧输出。跨两次 final rename 的
+  进程崩溃 / 断电不具备文件系统事务保证。
 
 ## 2026-07-07 Dump 转 CSV
 
@@ -198,22 +205,30 @@ Aries converter 使用相同 stock dump 和 `trading_day = 20260707` 做完整
 ./build/release/data/converter/twse_dump_converter \
   --dump /home/liuxiang/data/raw/stock/twse_stock_20260707.dump \
   --output /home/liuxiang/tmp/<run>/twse_stock_20260707.csv \
+  --basic-output /home/liuxiang/tmp/<run>/twse_basic_info_20260707.csv \
   --trading-day 20260707 \
   --symbol-filter-mode stock
 ```
 
-读取 25,993,761 条 message、输出 15,886,026 条数据行、维护 1,979 个
-symbol，共读取 3,153,093,917 bytes。Aries 输出与 Orion 正式输出均为
+读取 25,993,761 条 message、输出 15,886,026 条 depth 数据行、维护 1,979 个
+depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正式输出均为
 2,742,684,274 bytes，SHA-256 均为
 `f5981991517c24d07fbe4ee2ef38d9b9d3d198b69d2c841cdab39d5a8cb3cc41`，
 `cmp` 返回 0。完整 dump 的其余四种 filter mode 也已通过 dry-run；该 dump
-没有可供 `odd_lot` / `warrant` 输出的真实消息，因此这两种输出路径仍以
-synthetic fixture 为验证证据。
+没有可供 `odd_lot` format23 / `warrant` format17 depth 输出的真实消息，
+因此这两种 depth 输出路径仍以 synthetic fixture 为验证证据。
 
-严格校验后的完整 Aries 输出保留在：
+同次转换读取 1,145,472 条 format1 正常记录和 167 条控制记录；去除
+1,104,631 条完全相同的重复后，basic-info 得到 40,841 个唯一主键，未发现
+同键字段变化。输出为 5,118,361 bytes、40,841 个数据行、30 列，SHA-256 为
+`093699608154545fafe40337ad7616c029b3c5ae7ef1277b84cdfd4d349f540a`。
+主键严格排序且唯一；TWSE 30,488 行、TPEx 10,353 行；37,937 条权证的
+`warrant_flag`、`security_type` 与 `market_data_line` 三个判据完全一致，另有
+2,904 条非权证。验证输出位于：
 
 ```text
-/home/liuxiang/tmp/aries-twse-final.P5bwWQ/twse_stock_20260707.csv
+/home/liuxiang/tmp/aries-twse-basic-verify.w0V22Y/twse_stock_20260707.csv
+/home/liuxiang/tmp/aries-twse-basic-verify.w0V22Y/twse_basic_info_20260707.csv
 ```
 
 ## 未完成事项
