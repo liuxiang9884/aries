@@ -22,7 +22,7 @@ ctest --test-dir build/debug \
   version、五种 filter mode 和 UTC+8 `trading_day`。
 - 非法 service / version / BCD / checksum / 日期、short body、超过五档、
   截断 dump、有界 frame 重同步、受影响 symbol 隔离和结束控制 symbol。
-- depth / basic-info CSV 内容、multiplier 与 odd-lot value 单位、dry-run、默认
+- orderbook / basic-info CSV 内容、multiplier 与 odd-lot value 单位、dry-run、默认
   拒绝覆盖、缺失 multiplier 隔离、best-effort 双文件发布、双文件旧版本保护、
   partial symlink / 目录防护和发布回滚。
 
@@ -39,7 +39,7 @@ ctest --test-dir build/debug \
 成功日志应包含：
 
 ```text
-status=validated messages=25993761 depth_rows=15886026 depth_symbols=1979
+status=validated messages=25993761 orderbook_rows=15886026 orderbook_symbols=1979
 basic_messages=1145472 basic_controls=167 basic_duplicates=1104631
 basic_rows=40841 cycle_mismatches=0 frame_errors=0
 missing_multiplier_messages=0 bytes=3153093917 dry_run=true
@@ -79,7 +79,7 @@ data/converter/scripts/rebuild_twse_csv \
   --basic-output /home/liuxiang/tmp/<run>/twse_basic_info_20260707.csv
 ```
 
-2026-08-01 以前可与 Orion depth 基准比较：
+2026-08-01 以前可与 Orion orderbook 基准比较：
 
 ```bash
 sha256sum \
@@ -95,10 +95,10 @@ cmp \
 
 | 输出 | bytes | 数据行 | 列数 | SHA-256 |
 |---|---:|---:|---:|---|
-| depth | 2,742,684,274 | 15,886,026 | 23 | `f5981991517c24d07fbe4ee2ef38d9b9d3d198b69d2c841cdab39d5a8cb3cc41` |
+| orderbook | 2,742,684,274 | 15,886,026 | 23 | `f5981991517c24d07fbe4ee2ef38d9b9d3d198b69d2c841cdab39d5a8cb3cc41` |
 | basic-info | 5,118,361 | 40,841 | 30 | `093699608154545fafe40337ad7616c029b3c5ae7ef1277b84cdfd4d349f540a` |
 
-当前 depth `total_value` 已纳入 format1 `multiplier`，不得再要求 depth hash 或
+当前 orderbook `total_value` 已纳入 format1 `multiplier`，不得再要求 orderbook hash 或
 `cmp` 与 Orion 相同。完整验证应保持数据行数和 23 列 schema，并抽查一般交易满足
 `new_total_value - old_total_value = delta_volume * last_price * multiplier`；
 odd-lot 使用有效乘数 1。
@@ -164,7 +164,7 @@ trailer、13:45:59 inclusive / 13:46 exclusive 日盘硬截止、dry-run 和双 
 成功日志应包含：
 
 ```text
-messages=61605862 depth_rows=54086067 symbols=4839
+messages=61605862 orderbook_rows=54086067 symbols=4839
 i010=154801 i011=56403 i012=154880
 basic_duplicates=209085 i012_duplicates=153120 i012_conflicts=0 basic_rows=4839
 ignored=2260130 metadata_missing=9 sequence_gaps=4 unresolved_gaps=0
@@ -172,8 +172,8 @@ stale=0 recoveries=4 cache_overflows=0 resets=0 bytes=5640462381
 day_cutoff_reached=true day_cutoff_offset=5640462381
 ```
 
-完整 CSV 另用独立扫描检查：depth header/每行为 44 列、basic-info 为 27 列，
-`symbol_id=-1`、`localtime=exchtime`、volume/flag/high-low 合法、每个 depth symbol
+完整 CSV 另用独立扫描检查：orderbook header/每行为 44 列、basic-info 为 27 列，
+`symbol_id=-1`、`localtime=exchtime`、volume/flag/high-low 合法、每个 orderbook symbol
 sequence 严格递增、basic symbol 排序且唯一、multiplier 大于 0。负价格必须只出现在
 calendar spread，`total_value` 必须非负。当前 contract 的全量重建输出位于
 `/tw_backup/data/tw/csv/future/`；完成后再记录固定 hash 基线。

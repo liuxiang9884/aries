@@ -224,8 +224,9 @@ MessageDecoder::MessageDecoder(std::int32_t trading_day, SymbolFilterMode mode)
     : trading_day_start_ns_(TradingDayStartNanoseconds(trading_day)),
       trading_day_(trading_day), mode_(mode) {}
 
-const DepthRecord *MessageDecoder::Process(const MessageHeader &header,
-                                           std::span<const std::uint8_t> body) {
+const Orderbook<5> *
+MessageDecoder::Process(const MessageHeader &header,
+                        std::span<const std::uint8_t> body) {
   if (header.message_length != protocol::kHeaderSize + body.size()) {
     throw std::runtime_error("TWSE header and body lengths do not match");
   }
@@ -261,7 +262,7 @@ const DepthRecord *MessageDecoder::Process(const MessageHeader &header,
   }
 }
 
-DepthRecord *
+Orderbook<5> *
 MessageDecoder::FindOrCreate(std::span<const std::uint8_t> exchange_symbol) {
   const std::string_view raw_symbol(
       reinterpret_cast<const char *>(exchange_symbol.data()),
@@ -338,7 +339,7 @@ void MessageDecoder::ProcessOddLotBasicInfo(
       DecodePrice(body.subspan(protocol::kOddLotLowLimitOffset, 5));
 }
 
-const DepthRecord *
+const Orderbook<5> *
 MessageDecoder::ProcessDepth(const MessageHeader &header,
                              std::span<const std::uint8_t> body, bool odd_lot,
                              bool emit) {

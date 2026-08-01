@@ -181,16 +181,16 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
   }
   if (!options.dry_run && options.output_path.lexically_normal() ==
                               options.basic_output_path.lexically_normal()) {
-    throw std::invalid_argument("depth and basic-info outputs must differ");
+    throw std::invalid_argument("orderbook and basic-info outputs must differ");
   }
 
   MessageDecoder decoder(options.trading_day, options.symbol_filter_mode);
   BasicInfoCatalog basic_info_catalog(options.trading_day);
-  std::unique_ptr<DepthCsvWriter> depth_writer;
+  std::unique_ptr<OrderbookCsvWriter> orderbook_writer;
   std::unique_ptr<BasicInfoCsvWriter> basic_info_writer;
   if (!options.dry_run) {
-    depth_writer = std::make_unique<DepthCsvWriter>(options.output_path,
-                                                    options.overwrite);
+    orderbook_writer = std::make_unique<OrderbookCsvWriter>(options.output_path,
+                                                            options.overwrite);
     basic_info_writer = std::make_unique<BasicInfoCsvWriter>(
         options.basic_output_path, options.overwrite);
   }
@@ -278,7 +278,7 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
 
     const auto &header = *decoded_header;
     try {
-      const DepthRecord *record = nullptr;
+      const Orderbook<5> *record = nullptr;
       if (header.message_type == MessageType::kStockBasicInfo) {
         const auto *basic_info =
             basic_info_catalog.Process(header, body, offset);
@@ -292,8 +292,8 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
       ++stats.messages_read;
       if (record != nullptr) {
         ++stats.rows_written;
-        if (depth_writer != nullptr) {
-          depth_writer->Write(*record);
+        if (orderbook_writer != nullptr) {
+          orderbook_writer->Write(*record);
         }
       }
       offset += header.message_length;
@@ -328,7 +328,7 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
     for (const auto &record : basic_info_records) {
       basic_info_writer->Write(record);
     }
-    CsvOutputTransaction::Commit(*depth_writer, *basic_info_writer);
+    CsvOutputTransaction::Commit(*orderbook_writer, *basic_info_writer);
   }
   return stats;
 }

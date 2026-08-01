@@ -5,8 +5,8 @@
 ## 当前范围
 
 当前已有工作集中在台湾 raw 行情下载、本地落盘、TWSE / TAIFEX dump converter，
-以及 2026-07-07 真实数据验证。TWSE 当前生成 23 列 depth 与 format1 basic-info；
-TAIFEX 生成全 futures research depth/basic-info。仓库尚未建立跨市场统一的 schema
+以及 2026-07-07 真实数据验证。TWSE 当前生成 23 列 orderbook 与 format1 basic-info；
+TAIFEX 生成全 futures research orderbook/basic-info。仓库尚未建立跨市场统一的 schema
 version、manifest、分区格式、夜盘交易日历或通用质量报告。
 
 ## NAS Raw 下载
@@ -82,7 +82,7 @@ tests/data/converter/twse/
 
 | format | 含义 | 处理方式 |
 |---:|---|---|
-| 1 | stock basic info | 更新 depth 状态，并进入去重后的 basic-info CSV |
+| 1 | stock basic info | 更新 orderbook 状态，并进入去重后的 basic-info CSV |
 | 6 | stock depth | 更新五档与成交状态；按 mode 决定是否输出 |
 | 17 | warrant depth | 复用标准 depth 解码；`warrant` mode 输出 |
 | 22 | odd-lot basic info | `odd_lot` mode 更新基础状态 |
@@ -108,7 +108,7 @@ format 6 末尾 symbol 为 `000000`、时间为 `999999999999` 的结束控制�
 | `odd_lot` | format 23 |
 | `all` | format 6 的全部非控制 symbol |
 
-depth CSV 固定为以下 23 列：
+orderbook CSV 固定为以下 23 列：
 
 ```text
 symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,
@@ -213,14 +213,14 @@ cd /home/liuxiang/dev/orion
   --symbol-filter-mode stock
 ```
 
-读取 25,993,761 条 message、输出 15,886,026 条 depth 数据行、维护 1,979 个
-depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正式输出均为
+读取 25,993,761 条 message、输出 15,886,026 条 orderbook 数据行、维护 1,979 个
+orderbook symbol，共读取 3,153,093,917 bytes。Aries orderbook 输出与 Orion 正式输出均为
 2,742,684,274 bytes，SHA-256 均为
 `f5981991517c24d07fbe4ee2ef38d9b9d3d198b69d2c841cdab39d5a8cb3cc41`，
-`cmp` 返回 0。新 contract 不再以该 depth hash 或 `cmp` 为完成条件。完整 dump 的
+`cmp` 返回 0。新 contract 不再以该 orderbook hash 或 `cmp` 为完成条件。完整 dump 的
 其余四种 filter mode 也已通过 dry-run；该 dump
-没有可供 `odd_lot` format23 / `warrant` format17 depth 输出的真实消息，
-因此这两种 depth 输出路径仍以 synthetic fixture 为验证证据。
+没有可供 `odd_lot` format23 / `warrant` format17 orderbook 输出的真实消息，
+因此这两种 orderbook 输出路径仍以 synthetic fixture 为验证证据。
 
 同次转换读取 1,145,472 条 format1 正常记录和 167 条控制记录；去除
 1,104,631 条完全相同的重复后，basic-info 得到 40,841 个唯一主键，未发现
@@ -257,7 +257,7 @@ depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正�
 ```
 
 converter 在第一条 `13:46:00` 消息前读取 61,605,862 条消息，模拟输出
-54,086,067 条 depth 数据行；处理 154,801 条 I010、56,403 条 I011 与 154,880 条
+54,086,067 条 orderbook 数据行；处理 154,801 条 I010、56,403 条 I011 与 154,880 条
 I012。I010/I011 一致重复为 209,085 条，I012 一致重复为 153,120 条、冲突为 0，
 basic-info 为 4,839 条。
 9 条 realtime 在 metadata 前到达；4 个 product sequence gap 全部恢复，没有 stale、
@@ -276,7 +276,7 @@ metadata-before-basic 涉及 `TJFH6/L6`、`TJFL6`、`TJFG6`；gap 涉及
 | `/data/tw/csv/future/taifex_20260707_future.csv` | 18,034,209,936 | 54,221,272 | 45 | `5dd579b47fd1b0ee803c076d36cef58e14631741c9672051283ca16a228688f1` |
 | `/data/tw/csv/future/taifex_20260707_future_basic_info.csv` | 487,542 | 4,839 | 27 | `200f3c86d6f788a99f23d733f4ccdd28c91044085963c4d4c32b9ea0b6094577` |
 
-历史输出的独立全文件检查确认 depth 每行 45 列、2,923 个有 depth 的 symbol 内 sequence
+历史输出的独立全文件检查确认 orderbook 每行 45 列、2,923 个有 orderbook 的 symbol 内 sequence
 严格递增，identity/time/volume/flag/high-low 约束无异常；basic-info 每行 27 列、
 symbol 排序且唯一、multiplier 全部大于 0。43,388 行包含负 signed price/value，
 全部来自 calendar spread。发生 gap 的 4 个 symbol 共 441,094 行持续标记
@@ -291,13 +291,13 @@ TWSE 历史重建采用 `data/converter/scripts/rebuild_twse_csv`，raw dump 保
 `/tw_backup/data/tw/raw/stock/`，CSV 成对写入 `/tw_backup/data/tw/csv/stock/`。
 2026-08-01 已验证并发布三个旧失败日：
 
-| 日期 | publication | depth 行 | basic-info 行 | 问题 |
+| 日期 | publication | orderbook 行 | basic-info 行 | 问题 |
 |---|---|---:|---:|---|
 | 2025-09-09 | `published_partial` | 8,861,899 | 45,380 | 3 个 format1 cycle mismatch |
 | 2025-09-25 | `published_partial` | 4,075,957 | 45,657 | offset `797405152` 跳过 32 bytes；`2603` 后续隔离 |
 | 2025-10-14 | `published_partial` | 2,541,590 | 45,790 | offset `554258381` 跳过 51 bytes；`1256` 后续隔离 |
 
-三天 depth 全文件检查均为 23 列、`total_value` 非负且按 symbol 不回退；basic-info
+三天 orderbook 全文件检查均为 23 列、`total_value` 非负且按 symbol 不回退；basic-info
 均为 30 列、主键无重复且 multiplier 全部大于 0。局部损坏后的受影响 symbol 不再
 输出，因此该 symbol 的当日文件只包含损坏前的可信前缀；研究时必须结合逐日日志和
 publication status 使用。

@@ -24,7 +24,7 @@ protected:
                   std::to_string(reinterpret_cast<std::uintptr_t>(this)));
     std::filesystem::create_directories(directory_);
     dump_path_ = directory_ / "input.dump";
-    output_path_ = directory_ / "depth.csv";
+    output_path_ = directory_ / "orderbook.csv";
     basic_output_path_ = directory_ / "basic.csv";
   }
 
@@ -43,7 +43,7 @@ protected:
   std::filesystem::path basic_output_path_;
 };
 
-TEST_F(TaifexDumpConverterTest, ConvertsAndPublishesDepthAndBasicCsv) {
+TEST_F(TaifexDumpConverterTest, ConvertsAndPublishesOrderbookAndBasicCsv) {
   std::vector<std::uint8_t> dump;
   const auto kind = test::MakeI011("TXF", 200.0);
   test::AppendFrame(dump, '1', '3', 4, kind);
@@ -62,17 +62,19 @@ TEST_F(TaifexDumpConverterTest, ConvertsAndPublishesDepthAndBasicCsv) {
   EXPECT_EQ(stats.messages_read, 4);
   EXPECT_EQ(stats.rows_written, 1);
   EXPECT_EQ(stats.basic_info_rows, 1);
-  std::ifstream depth_input(output_path_, std::ios::binary);
-  const std::string depth((std::istreambuf_iterator<char>(depth_input)), {});
-  EXPECT_NE(depth.find("trading_day,market,symbol,symbol_id"),
+  std::ifstream orderbook_input(output_path_, std::ios::binary);
+  const std::string orderbook((std::istreambuf_iterator<char>(orderbook_input)),
+                              {});
+  EXPECT_NE(orderbook.find("trading_day,market,symbol,symbol_id"),
             std::string::npos);
-  EXPECT_NE(depth.find("20260707,TAIFEX,TXFG6,-1,"), std::string::npos);
-  EXPECT_NE(depth.find(",22100.000000,3,3,13260000.000000,2,1,"),
+  EXPECT_NE(orderbook.find("20260707,TAIFEX,TXFG6,-1,"), std::string::npos);
+  EXPECT_NE(orderbook.find(",22100.000000,3,3,13260000.000000,2,1,"),
             std::string::npos);
-  EXPECT_EQ(depth.find("continuous_flag"), std::string::npos);
-  const auto header_end = depth.find('\n');
+  EXPECT_EQ(orderbook.find("continuous_flag"), std::string::npos);
+  const auto header_end = orderbook.find('\n');
   ASSERT_NE(header_end, std::string::npos);
-  EXPECT_EQ(std::count(depth.begin(), depth.begin() + header_end, ','), 43);
+  EXPECT_EQ(std::count(orderbook.begin(), orderbook.begin() + header_end, ','),
+            43);
 
   std::ifstream basic_input(basic_output_path_, std::ios::binary);
   const std::string basic_csv((std::istreambuf_iterator<char>(basic_input)),
@@ -123,7 +125,7 @@ TEST_F(TaifexDumpConverterTest, InvalidChecksumKeepsExistingOutputs) {
   test::WriteBinaryFile(dump_path_, dump);
   {
     std::ofstream output(output_path_);
-    output << "old-depth\n";
+    output << "old-orderbook\n";
   }
   {
     std::ofstream output(basic_output_path_);
@@ -134,10 +136,10 @@ TEST_F(TaifexDumpConverterTest, InvalidChecksumKeepsExistingOutputs) {
 
   EXPECT_THROW((void)ConvertDump(options), std::runtime_error);
 
-  std::ifstream depth_input(output_path_);
-  std::string depth;
-  std::getline(depth_input, depth);
-  EXPECT_EQ(depth, "old-depth");
+  std::ifstream orderbook_input(output_path_);
+  std::string orderbook;
+  std::getline(orderbook_input, orderbook);
+  EXPECT_EQ(orderbook, "old-orderbook");
   std::ifstream basic_input(basic_output_path_);
   std::string basic;
   std::getline(basic_input, basic);

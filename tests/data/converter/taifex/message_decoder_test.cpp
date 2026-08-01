@@ -22,10 +22,19 @@ MessageHeader Header(char transmission, char kind, std::uint8_t version,
                        .body_length = body_size};
 }
 
+TEST(TaifexOrderbookTest, TemplateControlsLevelCount) {
+  const Orderbook<3> orderbook;
+
+  EXPECT_EQ(orderbook.ask_price.size(), 3);
+  EXPECT_EQ(orderbook.ask_volume.size(), 3);
+  EXPECT_EQ(orderbook.bid_price.size(), 3);
+  EXPECT_EQ(orderbook.bid_volume.size(), 3);
+}
+
 TEST(TaifexMessageDecoderTest, BuildsTradeAndIncrementalBookWithMultiplier) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
 
   const auto kind = test::MakeI011("TXF", 200.0, 2, 'I');
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
@@ -67,8 +76,8 @@ TEST(TaifexMessageDecoderTest, BuildsTradeAndIncrementalBookWithMultiplier) {
 
 TEST(TaifexMessageDecoderTest, AccumulatesAbsoluteValueForNegativeSpreadTrade) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto trade =
@@ -86,8 +95,8 @@ TEST(TaifexMessageDecoderTest, AccumulatesAbsoluteValueForNegativeSpreadTrade) {
 TEST(TaifexMessageDecoderTest,
      ParsesPriceLimitsWithoutChangingOpeningReferencePrice) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto basic = test::MakeI010("TXFG6", 22'000'00);
@@ -118,7 +127,7 @@ TEST(TaifexMessageDecoderTest,
 TEST(TaifexMessageDecoderTest,
      RecordsConflictingPriceLimitsAndKeepsConverting) {
   MessageDecoder decoder(20260707);
-  const auto emit = [](const DepthRecord &) {};
+  const auto emit = [](const Orderbook<5> &) {};
   constexpr std::array<test::PriceLimit, 1> kRaise{{
       {.level = 1, .price = 24'200'00},
   }};
@@ -146,7 +155,7 @@ TEST(TaifexMessageDecoderTest,
 
 TEST(TaifexMessageDecoderTest, RejectsPriceLimitsWithoutBothSides) {
   MessageDecoder decoder(20260707);
-  const auto emit = [](const DepthRecord &) {};
+  const auto emit = [](const Orderbook<5> &) {};
   constexpr std::array<test::PriceLimit, 1> kFall{{
       {.level = 1, .price = 19'800'00},
   }};
@@ -159,8 +168,8 @@ TEST(TaifexMessageDecoderTest, RejectsPriceLimitsWithoutBothSides) {
 
 TEST(TaifexMessageDecoderTest, PreservesZeroOpeningPriceForCalendarSpread) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
 
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
@@ -198,8 +207,8 @@ TEST(TaifexMessageDecoderTest, DecodesHeaderAndRejectsInvalidEscape) {
 
 TEST(TaifexMessageDecoderTest, ResetClearsBookAndRestartsProductSequence) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto basic = test::MakeI010("TXFG6", 22'000'00);
@@ -225,8 +234,8 @@ TEST(TaifexMessageDecoderTest, ResetClearsBookAndRestartsProductSequence) {
 
 TEST(TaifexMessageDecoderTest, FullSnapshotClearsOrdinaryAndDerivedLevels) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto basic = test::MakeI010("TXFG6", 22'000'00);
@@ -256,8 +265,8 @@ TEST(TaifexMessageDecoderTest, FullSnapshotClearsOrdinaryAndDerivedLevels) {
 
 TEST(TaifexMessageDecoderTest, RecoversGapFromI084AndReplaysCachedUpdate) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto basic = test::MakeI010("TXFG6", 22'000'00);
@@ -295,8 +304,8 @@ TEST(TaifexMessageDecoderTest, RecoversGapFromI084AndReplaysCachedUpdate) {
 
 TEST(TaifexMessageDecoderTest, UsesKindMetadataForSpread) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto spread = test::MakeI081(
@@ -319,8 +328,8 @@ TEST(TaifexMessageDecoderTest, UsesKindMetadataForSpread) {
 TEST(TaifexMessageDecoderTest,
      DoesNotRollBackReplayedEventsWithOlderSnapshotStatistics) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto basic = test::MakeI010("TXFG6", 22'000'00);
@@ -357,8 +366,8 @@ TEST(TaifexMessageDecoderTest,
 TEST(TaifexMessageDecoderTest,
      AppliesSnapshotStatisticsAfterReplayingOnlyOrderBookEvents) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto basic = test::MakeI010("TXFG6", 22'000'00);
@@ -396,7 +405,7 @@ TEST(TaifexMessageDecoderTest,
 
 TEST(TaifexMessageDecoderTest, ReportsUnresolvedGapAtEndOfDump) {
   MessageDecoder decoder(20260707);
-  const auto emit = [](const DepthRecord &) {};
+  const auto emit = [](const Orderbook<5> &) {};
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   const auto basic = test::MakeI010("TXFG6", 22'000'00);
@@ -418,7 +427,7 @@ TEST(TaifexMessageDecoderTest, ReportsUnresolvedGapAtEndOfDump) {
 
 TEST(TaifexMessageDecoderTest, ReportsMetadataMissingAndIgnoredMessageTypes) {
   MessageDecoder decoder(20260707);
-  const auto emit = [](const DepthRecord &) {};
+  const auto emit = [](const Orderbook<5> &) {};
   const auto update = test::MakeI081(
       "TXFG6", 7, '0',
       {.type = '0', .price = 22'000'00, .volume = 5, .level = 1});
@@ -440,7 +449,7 @@ TEST(TaifexMessageDecoderTest, ReportsMetadataMissingAndIgnoredMessageTypes) {
 TEST(TaifexMessageDecoderTest,
      ReportsProductWhoseContractMetadataNeverArrives) {
   MessageDecoder decoder(20260707);
-  const auto emit = [](const DepthRecord &) {};
+  const auto emit = [](const Orderbook<5> &) {};
   const auto basic = test::MakeI010("TXFG6", 22'000'00);
   decoder.Process(Header('1', '1', 9, basic.size()), basic, emit);
 
@@ -456,8 +465,8 @@ TEST(TaifexMessageDecoderTest,
 
 TEST(TaifexMessageDecoderTest, DisablesOnlyOverflowingSymbolAndReportsIssue) {
   MessageDecoder decoder(20260707);
-  std::vector<DepthRecord> rows;
-  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  std::vector<Orderbook<5>> rows;
+  const auto emit = [&](const Orderbook<5> &record) { rows.push_back(record); };
   const auto kind = test::MakeI011("TXF", 200.0);
   decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
   for (std::uint64_t sequence = 2;

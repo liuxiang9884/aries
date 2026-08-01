@@ -20,7 +20,7 @@
 namespace aries::data::taifex {
 namespace {
 
-constexpr std::string_view kDepthHeader =
+constexpr std::string_view kOrderbookHeader =
     "trading_day,market,symbol,symbol_id,exchtime,localtime,reference_price,"
     "open,high,low,last_price,trade_volume,total_volume,total_value,"
     "total_buy_count,total_sell_count,"
@@ -265,16 +265,17 @@ void PublishPair(StagedFile &first, StagedFile &second) {
 } // namespace
 
 struct CsvWriter::Impl {
-  Impl(const std::filesystem::path &depth_path,
+  Impl(const std::filesystem::path &orderbook_path,
        const std::filesystem::path &basic_path, bool overwrite)
-      : depth(depth_path, overwrite, kDepthHeader),
+      : orderbook(orderbook_path, overwrite, kOrderbookHeader),
         basic(basic_path, overwrite, kBasicHeader) {
-    if (depth_path.lexically_normal() == basic_path.lexically_normal()) {
-      throw std::invalid_argument("depth and basic-info outputs must differ");
+    if (orderbook_path.lexically_normal() == basic_path.lexically_normal()) {
+      throw std::invalid_argument(
+          "orderbook and basic-info outputs must differ");
     }
   }
 
-  void WriteDepth(const DepthRecord &record) {
+  void WriteOrderbook(const Orderbook<5> &record) {
     row.clear();
     fmt::format_to(
         std::back_inserter(row),
@@ -294,7 +295,7 @@ struct CsvWriter::Impl {
                    record.derived_bid_price, record.derived_bid_volume,
                    record.match_flag, record.build_type,
                    record.orderbook_action, record.sequence);
-    depth.Write(std::string_view(row.data(), row.size()));
+    orderbook.Write(std::string_view(row.data(), row.size()));
   }
 
   void WriteBasic(const BasicInfoRecord &record) {
@@ -317,28 +318,28 @@ struct CsvWriter::Impl {
     basic.Write(std::string_view(row.data(), row.size()));
   }
 
-  StagedFile depth;
+  StagedFile orderbook;
   StagedFile basic;
   fmt::memory_buffer row;
 };
 
-CsvWriter::CsvWriter(const std::filesystem::path &depth_path,
+CsvWriter::CsvWriter(const std::filesystem::path &orderbook_path,
                      const std::filesystem::path &basic_path, bool overwrite)
-    : impl_(std::make_unique<Impl>(depth_path, basic_path, overwrite)) {}
+    : impl_(std::make_unique<Impl>(orderbook_path, basic_path, overwrite)) {}
 
 CsvWriter::~CsvWriter() = default;
 CsvWriter::CsvWriter(CsvWriter &&) noexcept = default;
 CsvWriter &CsvWriter::operator=(CsvWriter &&) noexcept = default;
 
-void CsvWriter::WriteDepth(const DepthRecord &record) {
-  impl_->WriteDepth(record);
+void CsvWriter::WriteOrderbook(const Orderbook<5> &record) {
+  impl_->WriteOrderbook(record);
 }
 
 void CsvWriter::Commit(std::span<const BasicInfoRecord> basic_records) {
   for (const auto &record : basic_records) {
     impl_->WriteBasic(record);
   }
-  PublishPair(impl_->depth, impl_->basic);
+  PublishPair(impl_->orderbook, impl_->basic);
 }
 
 } // namespace aries::data::taifex

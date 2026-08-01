@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -36,7 +37,9 @@ struct BasicInfoRecord {
   char end_session{};
 };
 
-struct DepthRecord {
+template <std::size_t N> struct Orderbook {
+  static_assert(N > 0, "Orderbook must contain at least one level");
+
   std::int32_t trading_day{};
   std::string symbol;
   std::int64_t exchtime{};
@@ -51,10 +54,10 @@ struct DepthRecord {
   double total_value{};
   std::int64_t total_buy_count{};
   std::int64_t total_sell_count{};
-  std::array<double, 5> ask_price{};
-  std::array<std::int64_t, 5> ask_volume{};
-  std::array<double, 5> bid_price{};
-  std::array<std::int64_t, 5> bid_volume{};
+  std::array<double, N> ask_price{};
+  std::array<std::int64_t, N> ask_volume{};
+  std::array<double, N> bid_price{};
+  std::array<std::int64_t, N> bid_volume{};
   double derived_ask_price{};
   std::int64_t derived_ask_volume{};
   double derived_bid_price{};

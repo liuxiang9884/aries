@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
   } logging_guard;
 
   CLI::App app{
-      "Convert a TAIFEX futures dump to depth and basic-info CSV files"};
+      "Convert a TAIFEX futures dump to orderbook and basic-info CSV files"};
   std::filesystem::path dump_path;
   std::filesystem::path output_path;
   std::filesystem::path basic_output_path;
@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
   app.add_option("-d,--dump", dump_path, "TAIFEX uncompressed dump file")
       ->required()
       ->check(CLI::ExistingFile);
-  app.add_option("-o,--output", output_path, "Final depth CSV output file");
+  app.add_option("-o,--output", output_path, "Final orderbook CSV output file");
   app.add_option("--basic-output", basic_output_path,
                  "Final basic-info CSV output file");
   app.add_option("--trading-day", trading_day, "Trading day in YYYYMMDD")
@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
          .dry_run = dry_run,
          .overwrite = overwrite});
     NOVA_INFO(
-        "TAIFEX conversion complete: messages={} depth_rows={} symbols={} "
+        "TAIFEX conversion complete: messages={} orderbook_rows={} symbols={} "
         "i010={} i011={} i012={} basic_duplicates={} i012_duplicates={} "
         "i012_conflicts={} basic_rows={} ignored={} metadata_missing={} "
         "sequence_gaps={} unresolved_gaps={} stale={} recoveries={} "

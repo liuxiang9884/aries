@@ -316,7 +316,7 @@ public:
     const auto trading_day = record_.trading_day;
     const auto symbol = record_.symbol;
     const auto reference_price = record_.reference_price;
-    record_ = DepthRecord{};
+    record_ = Orderbook<5>{};
     record_.trading_day = trading_day;
     record_.symbol = symbol;
     record_.reference_price = reference_price;
@@ -330,7 +330,7 @@ public:
     last_high_low_sequence_ = 0;
   }
 
-  void Process(SequencedEvent event, const DepthCallback &emit) {
+  void Process(SequencedEvent event, const OrderbookCallback &emit) {
     if (disabled_) {
       return;
     }
@@ -384,7 +384,7 @@ public:
 
   [[nodiscard]] bool Recover(std::uint64_t last_sequence, std::int64_t exchtime,
                              const std::vector<BookLevel> &levels,
-                             const DepthCallback &emit) {
+                             const OrderbookCallback &emit) {
     if (disabled_ || !waiting_for_snapshot_ ||
         last_sequence <= record_.sequence) {
       return false;
@@ -464,7 +464,7 @@ private:
     active_gap_issue_.reset();
   }
 
-  void ReplayCached(const DepthCallback &emit) {
+  void ReplayCached(const OrderbookCallback &emit) {
     waiting_for_snapshot_ = false;
     while (!cached_.empty()) {
       auto iterator = cached_.begin();
@@ -486,11 +486,11 @@ private:
     }
   }
 
-  void Apply(const SequencedEvent &event, const DepthCallback &emit) {
+  void Apply(const SequencedEvent &event, const OrderbookCallback &emit) {
     std::visit([&](const auto &value) { ApplyValue(value, emit); }, event);
   }
 
-  void ApplyValue(const TradeEvent &event, const DepthCallback &) {
+  void ApplyValue(const TradeEvent &event, const OrderbookCallback &) {
     record_.match_flag = event.trial ? 1 : 0;
     std::int64_t packet_volume = 0;
     for (const auto &[price, volume] : event.trades) {
@@ -521,14 +521,15 @@ private:
     record_.sequence = event.meta.sequence;
   }
 
-  void ApplyValue(const HighLowEvent &event, const DepthCallback &) {
+  void ApplyValue(const HighLowEvent &event, const OrderbookCallback &) {
     record_.high = event.high;
     record_.low = event.low;
     last_high_low_sequence_ = event.meta.sequence;
     record_.sequence = event.meta.sequence;
   }
 
-  void ApplyValue(const IncrementalEvent &event, const DepthCallback &emit) {
+  void ApplyValue(const IncrementalEvent &event,
+                  const OrderbookCallback &emit) {
     record_.orderbook_action = 0;
     for (const auto &level : event.levels) {
       ApplyIncrementalLevel(level);
@@ -538,7 +539,7 @@ private:
     FinishOutput();
   }
 
-  void ApplyValue(const FullBookEvent &event, const DepthCallback &emit) {
+  void ApplyValue(const FullBookEvent &event, const OrderbookCallback &emit) {
     ClearBook();
     for (const auto &level : event.levels) {
       SetSnapshotLevel(level);
@@ -656,7 +657,7 @@ private:
   double multiplier_{};
   DecoderStats &stats_;
   std::vector<ConversionIssue> &issues_;
-  DepthRecord record_;
+  Orderbook<5> record_;
   bool waiting_for_snapshot_{};
   bool disabled_{};
   bool has_open_{};
@@ -982,7 +983,7 @@ struct MessageDecoder::Impl {
 
   void ProcessTrade(const MessageHeader &header,
                     std::span<const std::uint8_t> body,
-                    const DepthCallback &emit) {
+                    const OrderbookCallback &emit) {
     RequireVersion(header, 1, "I024");
     if (body.size() <
         protocol::kTradeHeaderSize + protocol::kTradeSummarySize) {
@@ -1038,7 +1039,7 @@ struct MessageDecoder::Impl {
 
   void ProcessHighLow(const MessageHeader &header,
                       std::span<const std::uint8_t> body,
-                      const DepthCallback &emit) {
+                      const OrderbookCallback &emit) {
     RequireVersion(header, 1, "I025");
     RequireBodySize(body, protocol::kHighLowBodySize, "I025");
     const auto resolved = ResolveRealtime(body, 'E');
@@ -1062,7 +1063,7 @@ struct MessageDecoder::Impl {
 
   void ProcessIncremental(const MessageHeader &header,
                           std::span<const std::uint8_t> body,
-                          const DepthCallback &emit) {
+                          const OrderbookCallback &emit) {
     RequireVersion(header, 1, "I081");
     if (body.size() < protocol::kIncrementalHeaderSize) {
       throw std::runtime_error("TAIFEX I081 body is too short");
@@ -1115,7 +1116,7 @@ struct MessageDecoder::Impl {
 
   void ProcessFullBook(const MessageHeader &header,
                        std::span<const std::uint8_t> body,
-                       const DepthCallback &emit) {
+                       const OrderbookCallback &emit) {
     RequireVersion(header, 1, "I083");
     if (body.size() < protocol::kFullBookHeaderSize) {
       throw std::runtime_error("TAIFEX I083 body is too short");
@@ -1156,7 +1157,7 @@ struct MessageDecoder::Impl {
 
   void ProcessSnapshot(const MessageHeader &header,
                        std::span<const std::uint8_t> body,
-                       const DepthCallback &emit) {
+                       const OrderbookCallback &emit) {
     RequireVersion(header, 3, "I084");
     if (body.empty()) {
       throw std::runtime_error("TAIFEX I084 body is empty");
@@ -1298,7 +1299,7 @@ struct MessageDecoder::Impl {
   }
 
   void Process(const MessageHeader &header, std::span<const std::uint8_t> body,
-               const DepthCallback &emit) {
+               const OrderbookCallback &emit) {
     if (header.body_length != body.size()) {
       throw std::runtime_error("TAIFEX header and body lengths do not match");
     }
@@ -1473,7 +1474,7 @@ MessageDecoder &MessageDecoder::operator=(MessageDecoder &&) noexcept = default;
 
 void MessageDecoder::Process(const MessageHeader &header,
                              std::span<const std::uint8_t> body,
-                             const DepthCallback &emit) {
+                             const OrderbookCallback &emit) {
   impl_->Process(header, body, emit);
 }
 

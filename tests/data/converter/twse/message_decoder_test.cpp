@@ -13,6 +13,15 @@ namespace {
 
 using test::Level;
 
+TEST(OrderbookTest, TemplateControlsLevelCount) {
+  const Orderbook<3> orderbook;
+
+  EXPECT_EQ(orderbook.ask_price.size(), 3);
+  EXPECT_EQ(orderbook.ask_volume.size(), 3);
+  EXPECT_EQ(orderbook.bid_price.size(), 3);
+  EXPECT_EQ(orderbook.bid_volume.size(), 3);
+}
+
 TEST(MessageDecoderTest, AppliesBasicInfoAndDecodesStockDepthState) {
   MessageDecoder decoder(20260707, SymbolFilterMode::kStock);
   const auto basic = test::MakeStockBasic("2330", 900000, 990000, 810000);
@@ -151,11 +160,11 @@ TEST(MessageDecoderTest, SupportsOddLotAndWarrantOutputModes) {
       .maturity_date = 20261231,
       .market_data_line = 2,
   });
-  EXPECT_EQ(warrant_decoder.Process(
-                test::MakeHeader(MessageType::kStockBasicInfo,
-                                 warrant_basic.size()),
-                warrant_basic),
-            nullptr);
+  EXPECT_EQ(
+      warrant_decoder.Process(
+          test::MakeHeader(MessageType::kStockBasicInfo, warrant_basic.size()),
+          warrant_basic),
+      nullptr);
   constexpr std::array<Level, 1> kWarrantLevels{{
       {.price = 12300, .volume = 7},
   }};

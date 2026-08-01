@@ -10,7 +10,7 @@ namespace aries::data::taifex {
 
 class CsvWriter {
 public:
-  CsvWriter(const std::filesystem::path &depth_path,
+  CsvWriter(const std::filesystem::path &orderbook_path,
             const std::filesystem::path &basic_path, bool overwrite);
   ~CsvWriter();
 
@@ -19,7 +19,7 @@ public:
   CsvWriter(CsvWriter &&) noexcept;
   CsvWriter &operator=(CsvWriter &&) noexcept;
 
-  void WriteDepth(const DepthRecord &record);
+  void WriteOrderbook(const Orderbook<5> &record);
   void Commit(std::span<const BasicInfoRecord> basic_records);
 
 private:

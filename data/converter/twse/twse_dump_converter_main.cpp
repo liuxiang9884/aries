@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
   } logging_guard;
 
   CLI::App app{
-      "Convert a TWSE multicast dump to depth and basic-info CSV files"};
+      "Convert a TWSE multicast dump to orderbook and basic-info CSV files"};
   std::filesystem::path dump_path;
   std::filesystem::path output_path;
   std::filesystem::path basic_output_path;
@@ -123,8 +123,8 @@ int main(int argc, char **argv) {
                                   : std::string_view{"published_complete"});
     NOVA_INFO(
         "TWSE conversion complete: status={} mode={} messages={} "
-        "depth_rows={} "
-        "depth_symbols={} basic_messages={} basic_controls={} "
+        "orderbook_rows={} "
+        "orderbook_symbols={} basic_messages={} basic_controls={} "
         "basic_duplicates={} basic_rows={} cycle_mismatches={} "
         "frame_errors={} missing_multiplier_messages={} "
         "invalidated_symbol_messages={} bytes={} dry_run={}",

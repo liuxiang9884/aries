@@ -64,7 +64,7 @@ protected:
   std::filesystem::path basic_output_path_;
 };
 
-TEST_F(DumpConverterTest, ConvertsDumpToDepthCsvAndPublishesAtomically) {
+TEST_F(DumpConverterTest, ConvertsDumpToOrderbookCsvAndPublishesAtomically) {
   const auto dump = MakeStockDump();
   test::WriteBinaryFile(dump_path_, dump);
 
@@ -244,10 +244,11 @@ TEST_F(DumpConverterTest, TruncatedTailPublishesValidatedPrefixAsBothOutputs) {
   EXPECT_TRUE(std::filesystem::exists(output_path_));
   EXPECT_TRUE(std::filesystem::exists(basic_output_path_));
 
-  std::ifstream depth_input(output_path_, std::ios::binary);
-  const std::string depth_csv((std::istreambuf_iterator<char>(depth_input)),
-                              std::istreambuf_iterator<char>());
-  EXPECT_EQ(std::count(depth_csv.begin(), depth_csv.end(), '\n'), 1);
+  std::ifstream orderbook_input(output_path_, std::ios::binary);
+  const std::string orderbook_csv(
+      (std::istreambuf_iterator<char>(orderbook_input)),
+      std::istreambuf_iterator<char>());
+  EXPECT_EQ(std::count(orderbook_csv.begin(), orderbook_csv.end(), '\n'), 1);
 
   std::ifstream basic_input(basic_output_path_, std::ios::binary);
   const std::string basic_csv((std::istreambuf_iterator<char>(basic_input)),
@@ -326,11 +327,12 @@ TEST_F(DumpConverterTest, ResynchronizesAndContinuesWithUnaffectedSymbol) {
   ASSERT_TRUE(stats.frame_recovery_issues.front().recovered_offset.has_value());
   EXPECT_EQ(stats.frame_recovery_issues.front().affected_symbol, "2330");
   EXPECT_EQ(stats.invalidated_symbol_messages, 1);
-  std::ifstream depth_input(output_path_, std::ios::binary);
-  const std::string depth_csv((std::istreambuf_iterator<char>(depth_input)),
-                              std::istreambuf_iterator<char>());
-  EXPECT_EQ(depth_csv.find("2330,-1,"), std::string::npos);
-  EXPECT_NE(depth_csv.find("2317,-1,"), std::string::npos);
+  std::ifstream orderbook_input(output_path_, std::ios::binary);
+  const std::string orderbook_csv(
+      (std::istreambuf_iterator<char>(orderbook_input)),
+      std::istreambuf_iterator<char>());
+  EXPECT_EQ(orderbook_csv.find("2330,-1,"), std::string::npos);
+  EXPECT_NE(orderbook_csv.find("2317,-1,"), std::string::npos);
 }
 
 TEST_F(DumpConverterTest, CycleCountMismatchPublishesBothOutputs) {
@@ -375,17 +377,19 @@ TEST_F(DumpConverterTest, MissingMultiplierSkipsSymbolAndPublishesBothHeaders) {
   EXPECT_EQ(stats.missing_multiplier_messages, 1);
   ASSERT_EQ(stats.missing_multiplier_symbols.size(), 1);
   EXPECT_EQ(stats.missing_multiplier_symbols.front(), "2330");
-  std::ifstream depth_input(output_path_, std::ios::binary);
-  const std::string depth_csv((std::istreambuf_iterator<char>(depth_input)),
-                              std::istreambuf_iterator<char>());
-  EXPECT_EQ(std::count(depth_csv.begin(), depth_csv.end(), '\n'), 1);
+  std::ifstream orderbook_input(output_path_, std::ios::binary);
+  const std::string orderbook_csv(
+      (std::istreambuf_iterator<char>(orderbook_input)),
+      std::istreambuf_iterator<char>());
+  EXPECT_EQ(std::count(orderbook_csv.begin(), orderbook_csv.end(), '\n'), 1);
   std::ifstream basic_input(basic_output_path_, std::ios::binary);
   const std::string basic_csv((std::istreambuf_iterator<char>(basic_input)),
                               std::istreambuf_iterator<char>());
   EXPECT_EQ(std::count(basic_csv.begin(), basic_csv.end(), '\n'), 1);
 }
 
-TEST_F(DumpConverterTest, ZeroMultiplierMetadataPublishesBasicAndSkipsDepth) {
+TEST_F(DumpConverterTest,
+       ZeroMultiplierMetadataPublishesBasicAndSkipsOrderbook) {
   std::vector<std::uint8_t> dump;
   const auto basic = test::MakeBasicInfo(test::BasicInfoFields{
       .symbol = "2330",
@@ -405,10 +409,11 @@ TEST_F(DumpConverterTest, ZeroMultiplierMetadataPublishesBasicAndSkipsDepth) {
   EXPECT_EQ(stats.missing_multiplier_symbols.front(), "2330");
   EXPECT_EQ(stats.invalidated_symbol_messages, 1);
 
-  std::ifstream depth_input(output_path_, std::ios::binary);
-  const std::string depth_csv((std::istreambuf_iterator<char>(depth_input)),
-                              std::istreambuf_iterator<char>());
-  EXPECT_EQ(std::count(depth_csv.begin(), depth_csv.end(), '\n'), 1);
+  std::ifstream orderbook_input(output_path_, std::ios::binary);
+  const std::string orderbook_csv(
+      (std::istreambuf_iterator<char>(orderbook_input)),
+      std::istreambuf_iterator<char>());
+  EXPECT_EQ(std::count(orderbook_csv.begin(), orderbook_csv.end(), '\n'), 1);
   std::ifstream basic_input(basic_output_path_, std::ios::binary);
   const std::string basic_csv((std::istreambuf_iterator<char>(basic_input)),
                               std::istreambuf_iterator<char>());
@@ -487,9 +492,9 @@ TEST_F(DumpConverterTest, RefusesDanglingBasicInfoPartialSymlink) {
   EXPECT_FALSE(std::filesystem::exists(basic_output_path_));
   EXPECT_FALSE(std::filesystem::exists(symlink_target));
   EXPECT_TRUE(std::filesystem::is_symlink(partial_path));
-  auto depth_partial_path = output_path_;
-  depth_partial_path += ".partial." + std::to_string(::getpid());
-  EXPECT_FALSE(std::filesystem::exists(depth_partial_path));
+  auto orderbook_partial_path = output_path_;
+  orderbook_partial_path += ".partial." + std::to_string(::getpid());
+  EXPECT_FALSE(std::filesystem::exists(orderbook_partial_path));
 }
 
 TEST_F(DumpConverterTest, OddLotModeDoesNotCreateStateFromFormat1) {
@@ -515,7 +520,7 @@ TEST_F(DumpConverterTest, ChangedBasicInfoKeepsBothExistingOutputs) {
   test::WriteBinaryFile(dump_path_, dump);
   {
     std::ofstream existing(output_path_);
-    existing << "old-depth\n";
+    existing << "old-orderbook\n";
   }
   {
     std::ofstream existing(basic_output_path_);
@@ -526,10 +531,10 @@ TEST_F(DumpConverterTest, ChangedBasicInfoKeepsBothExistingOutputs) {
 
   EXPECT_THROW((void)ConvertDump(options), std::runtime_error);
 
-  std::ifstream depth_input(output_path_);
-  std::string depth_content;
-  std::getline(depth_input, depth_content);
-  EXPECT_EQ(depth_content, "old-depth");
+  std::ifstream orderbook_input(output_path_);
+  std::string orderbook_content;
+  std::getline(orderbook_input, orderbook_content);
+  EXPECT_EQ(orderbook_content, "old-orderbook");
   std::ifstream basic_input(basic_output_path_);
   std::string basic_content;
   std::getline(basic_input, basic_content);

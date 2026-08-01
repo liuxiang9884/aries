@@ -4,21 +4,21 @@
 #include <memory>
 
 #include "data/converter/twse/basic_info.h"
-#include "data/converter/twse/depth_record.h"
+#include "data/converter/twse/orderbook.h"
 
 namespace aries::data::twse {
 
-class DepthCsvWriter {
+class OrderbookCsvWriter {
 public:
-  DepthCsvWriter(const std::filesystem::path &output_path, bool overwrite);
-  ~DepthCsvWriter();
+  OrderbookCsvWriter(const std::filesystem::path &output_path, bool overwrite);
+  ~OrderbookCsvWriter();
 
-  DepthCsvWriter(const DepthCsvWriter &) = delete;
-  DepthCsvWriter &operator=(const DepthCsvWriter &) = delete;
-  DepthCsvWriter(DepthCsvWriter &&) noexcept;
-  DepthCsvWriter &operator=(DepthCsvWriter &&) noexcept;
+  OrderbookCsvWriter(const OrderbookCsvWriter &) = delete;
+  OrderbookCsvWriter &operator=(const OrderbookCsvWriter &) = delete;
+  OrderbookCsvWriter(OrderbookCsvWriter &&) noexcept;
+  OrderbookCsvWriter &operator=(OrderbookCsvWriter &&) noexcept;
 
-  void Write(const DepthRecord &record);
+  void Write(const Orderbook<5> &record);
 
 private:
   friend class CsvOutputTransaction;
@@ -46,7 +46,7 @@ private:
 
 class CsvOutputTransaction {
 public:
-  static void Commit(DepthCsvWriter &depth_writer,
+  static void Commit(OrderbookCsvWriter &orderbook_writer,
                      BasicInfoCsvWriter &basic_info_writer);
 };
 

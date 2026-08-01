@@ -1,12 +1,15 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
 namespace aries::data::twse {
 
-struct DepthRecord {
+template <std::size_t N> struct Orderbook {
+  static_assert(N > 0, "Orderbook must contain at least one level");
+
   std::string symbol;
   std::int64_t exchtime{};
   std::int64_t localtime{};
@@ -20,10 +23,10 @@ struct DepthRecord {
   std::int64_t total_volume{};
   double total_value{};
   std::int64_t total_trade{};
-  std::array<double, 5> ask_price{};
-  std::array<std::int64_t, 5> ask_volume{};
-  std::array<double, 5> bid_price{};
-  std::array<std::int64_t, 5> bid_volume{};
+  std::array<double, N> ask_price{};
+  std::array<std::int64_t, N> ask_volume{};
+  std::array<double, N> bid_price{};
+  std::array<std::int64_t, N> bid_volume{};
   std::int64_t sequence{};
 };
 

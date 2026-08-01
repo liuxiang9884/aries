@@ -27,7 +27,7 @@ cmake --preset debug \
 
 ## TWSE Dump 转换
 
-`twse_dump_converter` 将 TWSE BCD dump 同时转成 Orion 兼容的 23 列 depth
+`twse_dump_converter` 将 TWSE BCD dump 同时转成 Orion 兼容的 23 列 orderbook
 CSV 和 30 列 format1 basic-info CSV。当前支持 format 1、6、17、22、23，
 以及 `stock`、`etf`、`warrant`、`odd_lot`、`all` 五种 filter mode：
 
@@ -60,7 +60,7 @@ schema 与时间语义见 `data/docs/data.md`，协议核对和 Orion 差异见
 
 `taifex_dump_converter` 同步解析 TAIFEX futures I010/I011 与
 I024/I025/I081/I083/I084，把全部 outright 和 calendar spread 输出为 44 列
-depth CSV 与 27 列 basic-info CSV：
+orderbook CSV 与 27 列 basic-info CSV：
 
 ```bash
 ./build/release/data/converter/taifex_dump_converter \

@@ -56,7 +56,7 @@ struct DecoderStats {
   std::uint64_t reset_messages{};
 };
 
-using DepthCallback = std::function<void(const DepthRecord &)>;
+using OrderbookCallback = std::function<void(const Orderbook<5> &)>;
 
 [[nodiscard]] MessageHeader
 DecodeMessageHeader(std::span<const std::uint8_t> bytes);
@@ -74,7 +74,7 @@ public:
   MessageDecoder &operator=(MessageDecoder &&) noexcept;
 
   void Process(const MessageHeader &header, std::span<const std::uint8_t> body,
-               const DepthCallback &emit);
+               const OrderbookCallback &emit);
 
   void Finalize();
 

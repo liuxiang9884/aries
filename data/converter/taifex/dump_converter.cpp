@@ -53,7 +53,8 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
     throw std::invalid_argument("TAIFEX dump path is empty");
   }
   if (!options.dry_run && options.output_path.empty()) {
-    throw std::invalid_argument("depth output is required without --dry-run");
+    throw std::invalid_argument(
+        "orderbook output is required without --dry-run");
   }
   if (!options.dry_run && options.basic_output_path.empty()) {
     throw std::invalid_argument(
@@ -61,7 +62,7 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
   }
   if (!options.dry_run && options.output_path.lexically_normal() ==
                               options.basic_output_path.lexically_normal()) {
-    throw std::invalid_argument("depth and basic-info outputs must differ");
+    throw std::invalid_argument("orderbook and basic-info outputs must differ");
   }
 
   MessageDecoder decoder(options.trading_day);
@@ -86,10 +87,10 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
   std::array<std::uint8_t, protocol::kTrailerSize> trailer{};
   std::vector<std::uint8_t> body;
   std::uint64_t offset = 0;
-  const auto emit = [&](const DepthRecord &record) {
+  const auto emit = [&](const Orderbook<5> &record) {
     ++stats.rows_written;
     if (writer != nullptr) {
-      writer->WriteDepth(record);
+      writer->WriteOrderbook(record);
     }
   };
   while (true) {

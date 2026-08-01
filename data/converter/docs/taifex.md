@@ -4,7 +4,7 @@
 
 ## 范围与事实源
 
-`taifex_dump_converter` 把 TAIFEX futures multicast dump 同步转换为五档 depth
+`taifex_dump_converter` 把 TAIFEX futures multicast dump 同步转换为五档 orderbook
 CSV 和 basic-info CSV。它覆盖所有 futures outright 与 calendar spread，不内置
 stock-future、近月或交易时段 filter；资产池筛选交给下游研究流程。
 
@@ -50,7 +50,7 @@ sequential dump reader
   -> strict frame validation
   -> I010 product catalog + I011 contract catalog
   -> per-symbol product sequence + order book state
-  -> synchronous staged depth/basic CSV writer
+  -> synchronous staged orderbook/basic CSV writer
   -> 日盘截止或 exact EOF 后发布
 ```
 
@@ -93,7 +93,7 @@ spread 没有 I010，使用 symbol 前三字符匹配 I011，因而仍可正确�
 和 multiplier。若 realtime 早于 metadata，禁止默认为 decimal 0：消息计入
 `metadata_missing_messages` 并跳过，按 symbol/message/sequence 记录问题；后续
 sequence gap 由 I083/I084 恢复。若直到日盘截止或 EOF 都没有 I011，仍发布其余合约的 CSV，
-该 symbol 不产生 depth/basic-info 行。
+该 symbol 不产生 orderbook/basic-info 行。
 
 I010/I011 会在盘中轮播。日盘截止前影响输出的字段完全相同则去重并计数；同
 symbol/kind 的字段发生冲突时转换失败。13:46 后的盘后基本资料完全不读取，因此不会
@@ -101,9 +101,9 @@ symbol/kind 的字段发生冲突时转换失败。13:46 后的盘后基本资�
 exact body length；相同内容去重，内容变化记录 `price_limit_conflict` 并继续，
 不改写 I010 `reference_price`。I011 的 Big5/CP950 `NAME` 不解析、不输出。
 
-## Depth CSV contract
+## Orderbook CSV contract
 
-depth CSV 固定为 44 列：
+orderbook CSV 固定为 44 列：
 
 ```text
 trading_day,market,symbol,symbol_id,exchtime,localtime,
@@ -121,7 +121,7 @@ match_flag,build_type,orderbook_action,sequence
 - `exchtime` 是 CLI `trading_day` 的 UTC+8 当地零点加 header event time，单位为
   Unix epoch nanoseconds。
 - 所有 price 和 `total_value` 的内部类型为 `double`，CSV 固定 6 位小数。
-- `trade_volume` 是上次 depth 输出之后的成交 contract 数，输出后归零；
+- `trade_volume` 是上次 orderbook 输出之后的成交 contract 数，输出后归零；
   `total_volume` 直接采用 I024 `MATCH-TOTAL-QTY`。
 - `total_value` 累计 `abs(price) * contracts * multiplier`，单位为 basic-info
   `currency`。calendar spread 使用价差绝对值，保证累计值非负；它不是两条腿
@@ -224,7 +224,7 @@ volume、multiplier、全部 futures 和明确恢复语义的新 research schema
 converter 日盘 dry-run：
 
 ```text
-messages=61605862 depth_rows=54086067 symbols=4839
+messages=61605862 orderbook_rows=54086067 symbols=4839
 i010=154801 i011=56403 i012=154880
 basic_duplicates=209085 i012_duplicates=153120 i012_conflicts=0 basic_rows=4839
 ignored=2260130 metadata_missing=9 sequence_gaps=4 unresolved_gaps=0
@@ -252,7 +252,7 @@ transmission/kind 分项写入日志。
 
 独立于 converter 的完整 CSV 扫描确认：
 
-- 54,221,272 行全部为 45 列，2,923 个实际产生 depth 行的 symbol 内 sequence
+- 54,221,272 行全部为 45 列，2,923 个实际产生 orderbook 行的 symbol 内 sequence
   严格递增。
 - `trading_day/market/symbol_id`、`localtime=exchtime`、volume 非负、flag 枚举和
   high/low 约束无异常；时间范围为 `1783382563804000000` 至

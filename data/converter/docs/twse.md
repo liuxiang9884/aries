@@ -41,8 +41,8 @@ header 的 `service_type` 区分。format 1 的上柜一般股票资料比上市
 
 ## Format1 Basic-info CSV Contract
 
-非 dry-run 转换除 `--output <depth.csv>` 外，还必须提供
-`--basic-output <basic_info.csv>`。basic-info 不受 depth 的
+非 dry-run 转换除 `--output <orderbook.csv>` 外，还必须提供
+`--basic-output <basic_info.csv>`。basic-info 不受 orderbook 的
 `--symbol-filter-mode` 影响，收集同一 dump 内所有 TWSE / TPEx format1 正常
 证券记录。主键和稳定排序键均为 `(trading_day, market, symbol)`；业务别 `01`
 映射为 `TWSE`，业务别 `02` 映射为 `TPEX`。
@@ -89,7 +89,7 @@ header 的 `service_type` 区分。format 1 的上柜一般股票资料比上市
 
 权证判断使用 format1 的 `warrant_flag`、`security_type` 和
 `market_data_line`，任一判据成立即按权证字段解析；2026-07-07 完整数据中三个
-判据完全一致：37,937 行均同时满足，另有 2,904 行均不满足。depth 的既有
+判据完全一致：37,937 行均同时满足，另有 2,904 行均不满足。orderbook 的既有
 filter mode 语义不变。
 
 ### 控制记录、重复与冲突
@@ -121,7 +121,7 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
 - `all` mode 对所有 symbol 的 format 6 写 CSV，但不会写 format 17；这是
   Orion 当前 mode 语义，不把 `all` 解释为所有 format。
 - 每个 symbol 维护 previous close、涨跌停、open、last 和累计 volume。
-- depth CSV 为 23 列，不包含 bid / ask volume；price 和 `total_value` 保留
+- orderbook CSV 为 23 列，不包含 bid / ask volume；price 和 `total_value` 保留
   两位小数。
 - offline `symbol_id = -1`，`localtime = exchtime`。
 
@@ -138,33 +138,33 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
 | 动态档位 | 根据 bitfield 直接遍历 | 先验证最多五档及精确动态 body 长度 | 避免越界或错位读取 |
 | 结束控制消息 | `000000` 会被 `warrant` / `all` filter 接受，随后把 `999999999999` 当时间 | 所有 mode 都先忽略协议定义的结束控制消息 | 修复 `warrant` / `all` 完整 dump 末尾失败；有效行情不变 |
 | mode 拼写 | 未知字符串退回 `stock` | CLI 和 parser 都拒绝未知 mode | 防止拼写错误生成错误资产池 |
-| 输出发布 | writer 直接打开目标文件 | depth/basic-info 同时写入同目录 `.partial.<pid>`，完成后成对 rename；局部质量问题允许发布可信子集 | 兼顾研究数据可用性与问题可追溯性；不可恢复的全局错误仍保留旧输出 |
+| 输出发布 | writer 直接打开目标文件 | orderbook/basic-info 同时写入同目录 `.partial.<pid>`，完成后成对 rename；局部质量问题允许发布可信子集 | 兼顾研究数据可用性与问题可追溯性；不可恢复的全局错误仍保留旧输出 |
 | 异常上下文 | 多数解析路径没有输入 byte offset | 错误包含 message 起始 byte offset | 便于定位损坏 dump |
-| format1 输出 | 只更新 depth 内部状态 | 另生成 30 列、去重且排序的 basic-info CSV | 保留可研究的证券与权证基础资料 |
+| format1 输出 | 只更新 orderbook 内部状态 | 另生成 30 列、去重且排序的 basic-info CSV | 保留可研究的证券与权证基础资料 |
 | format1 控制 | `AL` / `NE` 可能成为 pseudo symbol | 识别控制记录，并在首轮同步后校验每个完整周期数量；mismatch 记录后继续 | 防止计数记录污染证券状态，检测并显式暴露丢包，同时保留其余可信数据 |
 | format1 重复 | 同 symbol 后到状态覆盖 | 相同记录去重；字段变化即失败并报告 diff | format1 无安全的 last-wins 时间语义 |
-| `total_value` | `delta_volume * last_price`，未乘交易单位 | 一般交易累计 `delta_volume * last_price * multiplier`；odd-lot 的 wire volume 已是实际证券数量，有效乘数为 1 | 统一为实际币种成交额；depth CSV 不再与 Orion byte-compatible |
+| `total_value` | `delta_volume * last_price`，未乘交易单位 | 一般交易累计 `delta_volume * last_price * multiplier`；odd-lot 的 wire volume 已是实际证券数量，有效乘数为 1 | 统一为实际币种成交额；orderbook CSV 不再与 Orion byte-compatible |
 | CLI 日志 | 工具原有输出方式 | outer CLI 使用 Nova `INFO` / `WARNING` / `ERROR`；core 返回结构化质量统计或通过异常传递全局错误 | 每个 recoverable issue 和最终 publication status 都可由 runner 收集 |
 
-2026-07-07 的旧验证曾证明修改前 depth CSV 与 Orion bytes 完全一致；该 hash 只
+2026-07-07 的旧验证曾证明修改前 orderbook CSV 与 Orion bytes 完全一致；该 hash 只
 作为历史基线。自 2026-08-01 起 `total_value` 纳入 format1 `multiplier`，因此新
-depth CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不变。
+orderbook CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不变。
 
 `total_value` 不是交易所直接提供的字段。一般交易按相邻消息累计量差、当前成交价
 和 format1 multiplier 计算，币种来自 basic-info `currency`；若成交量变化前尚未
-收到 multiplier metadata，不伪造乘数或成交额，该 symbol 从此不再输出 depth，
+收到 multiplier metadata，不伪造乘数或成交额，该 symbol 从此不再输出 orderbook，
 并在日志中记录 `missing_multiplier`。format 23 odd-lot 的 volume 已经是实际证券
 数量，因此不再乘标准交易单位。
 
 ## Best-effort 恢复与发布 contract
 
-- 非 dry-run 始终把 depth 与 basic-info 作为同一 generation 成对发布；某一类没有
+- 非 dry-run 始终把 orderbook 与 basic-info 作为同一 generation 成对发布；某一类没有
   可输出记录时，对应文件只包含稳定 header。
 - frame header、长度、checksum 或 terminal 失败后，从错误 offset 的下一 byte 开始
   向前扫描最多 1 MiB。候选位置必须完整通过 header、长度、checksum 和 terminal
   校验才是重同步点；未找到时停止读取后缀，但仍可发布此前的可信前缀。
 - 如果损坏 frame 的 body 能提供可打印的 symbol，converter 将该 symbol 标记为
-  invalidated，重同步后不再输出它的 depth。这样不会用跨缺口的累计 volume 和未知
+  invalidated，重同步后不再输出它的 orderbook。这样不会用跨缺口的累计 volume 和未知
   成交价继续计算错误的 `total_value`；其他 symbol 继续转换。
 - format1 cycle mismatch、局部 frame recovery 和 missing multiplier 都是可恢复质量
   问题，最终状态为 `published_partial`。没有上述问题时为 `published_complete`。
@@ -190,14 +190,14 @@ depth CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不变�
 - basic-info CSV 为 5,118,361 bytes、40,841 个数据行、30 列，SHA-256 为
   `093699608154545fafe40337ad7616c029b3c5ae7ef1277b84cdfd4d349f540a`；
   其中 TWSE 30,488 行、TPEx 10,353 行。
-- 该 dump 没有可供 `odd_lot` format23 / `warrant` format17 depth 输出的真实
-  消息；这两个 depth 输出路径目前仍由 synthetic fixture 覆盖。
-- 当前 depth CSV 丢弃五档 volume。包含 volume 的正式研究 schema 需要单独设计、
+- 该 dump 没有可供 `odd_lot` format23 / `warrant` format17 orderbook 输出的真实
+  消息；这两个 orderbook 输出路径目前仍由 synthetic fixture 覆盖。
+- 当前 orderbook CSV 丢弃五档 volume。包含 volume 的正式研究 schema 需要单独设计、
   版本化和迁移，不能直接修改现有 23 列输出。
 
 ## 输出实现边界
 
-- depth 与 basic-info 都使用同步 `ofstream` writer。Aquila 使用的
+- orderbook 与 basic-info 都使用同步 `ofstream` writer。Aquila 使用的
   `quill::CsvWriter` 是异步 `append_row()`，无法在调用点提供与当前 writer
   等价的磁盘写入错误传播，因此本工具只借鉴 compile-time schema 的组织思想，
   不采用异步 writer。
@@ -206,4 +206,4 @@ depth CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不变�
 - 两次 final rename 不是文件系统级事务。进程被强杀、主机崩溃或断电发生在两次
   rename 之间时，无法保证跨文件原子性；下游应在任务成功退出后再消费两个文件，
   后续 manifest 设计应补充跨文件 commit marker / generation id。
-- format22 仍只服务 odd-lot depth 的内部基础状态，本轮没有并入 basic-info CSV。
+- format22 仍只服务 odd-lot orderbook 的内部基础状态，本轮没有并入 basic-info CSV。
