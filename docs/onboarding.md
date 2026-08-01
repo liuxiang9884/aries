@@ -1,6 +1,6 @@
 # Aries 全局 Onboarding
 
-更新时间：2026-07-31
+更新时间：2026-08-01
 
 ## 项目职责
 
@@ -14,7 +14,8 @@
 - 数据模块已具备台湾 raw 数据下载工具；TWSE / TPEx dump converter 可同时生成
   Orion-compatible depth CSV 与去重后的 format1 basic-info CSV。TAIFEX converter
   仍是待提取骨架。
-- 因子、回测、模型和研究模块目前只有目录骨架，尚无正式行为 contract。
+- 回测模块已完成 `hftbacktest` 外部参考调研，正在准备首次架构设计，尚无正式行为
+  contract 或实现；因子、模型和研究模块目前仍只有目录骨架。
 - 大体积 raw、CSV、临时转换结果和实验产物均保存在仓库外。
 
 ## 模块入口
@@ -22,9 +23,9 @@
 | 模块 | Onboarding | 当前状态 |
 |---|---|---|
 | data | `data/docs/onboarding.md` | raw 数据与数据 contract |
-| data/converter | `data/converter/docs/onboarding.md` | 当前主线 |
+| data/converter | `data/converter/docs/onboarding.md` | 待恢复：TAIFEX converter |
 | factors | `factors/docs/onboarding.md` | 骨架 |
-| backtest | `backtest/docs/onboarding.md` | 骨架 |
+| backtest | `backtest/docs/onboarding.md` | 当前主线：首次架构设计准备 |
 | models | `models/docs/onboarding.md` | 骨架 |
 | research | `research/docs/onboarding.md` | 骨架 |
 
@@ -49,13 +50,15 @@ VCPKG_ROOT=/home/liuxiang/vcpkg ctest --preset debug
 
 ## 当前主线
 
-当前最具体模块是 `data/converter`。新对话在读取本文件后，直接读取
-`data/converter/docs/onboarding.md`，不默认读取其他模块 onboarding。
+当前最具体模块是 `backtest`。新对话在读取本文件后，直接读取
+`backtest/docs/onboarding.md`，不默认读取其他模块 onboarding。`data/converter`
+的 TAIFEX converter 仍为待恢复任务。
 
 ## 下一步
 
-按同级结构提取 TAIFEX dump converter，并在实现 volume / multiplier contract
-时与 TWSE 已解析的 `multiplier` 一起审查统一口径。
+以 `backtest/docs/hftbacktest-reference.md` 为事实基线，通过
+`grill-me-enhanced` 锁定 `aries` 回测系统的范围、时间线、撮合 / 成本假设、策略
+API、资金约束和验证阶梯，再做只读 adversarial plan review。
 
 ## 按需阅读
 
