@@ -35,6 +35,8 @@ inline constexpr std::size_t kMaximumSnapshotBookLevels = 64;
 inline constexpr std::size_t kMaximumSnapshotStatsEntries = 8;
 inline constexpr std::size_t kMaximumSnapshotStatusEntries = 32;
 inline constexpr std::size_t kMaximumCachedEventsPerSymbol = 8'192;
+inline constexpr std::int64_t kDaySessionEndExclusiveNanoseconds =
+    49'560'000'000'000LL;
 
 } // namespace protocol
 

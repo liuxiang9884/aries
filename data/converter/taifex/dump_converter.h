@@ -22,6 +22,8 @@ struct ConvertStats {
   std::uint64_t rows_written{};
   std::uint64_t symbols_seen{};
   std::uint64_t bytes_read{};
+  bool day_session_cutoff_reached{};
+  std::uint64_t day_session_cutoff_offset{};
   std::uint64_t product_basic_messages{};
   std::uint64_t contract_basic_messages{};
   std::uint64_t basic_duplicates{};

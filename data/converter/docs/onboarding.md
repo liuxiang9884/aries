@@ -20,10 +20,11 @@
   采用可审计的 best-effort 策略；depth/basic-info 成对发布，状态区分
   `published_complete` 与 `published_partial`。
 - `taifex_dump_converter` 已同步解析全部 TAIFEX futures outright 与 spread，
-  输出 44 列 research depth CSV 和 27 列 basic-info CSV；不依赖 SHM。
+  输出 44 列 research depth CSV 和 27 列 basic-info CSV；reader 在第一条
+  `13:46:00` 消息处硬停止，不依赖 SHM。
 - 2026-07-07 真实 TAIFEX dump 已按当前 contract 完成 full dry-run；读取
-  62,559,197 条消息，模拟输出 54,221,272 条 depth 行与 4,839 条 basic-info 行，
-  并解析 181,280 条 I012。
+  61,605,862 条日盘消息，模拟输出 54,086,067 条 depth 行与 4,839 条 basic-info 行，
+  并解析 154,880 条 I012。
 
 ## 关键入口
 
@@ -53,8 +54,10 @@
 - TAIFEX 的 `total_value = abs(price) * contracts * multiplier`，累计值非负。
 - TAIFEX metadata/gap/cache 问题不阻止其余合约发布，必须从每日日志审查 symbol、
   消息类型、sequence 和恢复状态；当前 depth CSV 不含逐行质量 flag。
-- 当前 TAIFEX 正式 contract 仅支持日盘。夜盘暂不转换，且 CLI 不会自动拒绝夜盘；
-  调用方必须保证输入只含日盘。启用夜盘前必须建立交易日历映射并补真实数据回归。
+- 当前 TAIFEX 正式 contract 仅支持统一日盘窗口：保留盘前消息及
+  `13:45:59.999999` 以前的消息，第一条 `13:46:00` 或更晚的 frame 及后续 bytes
+  全部不处理。该 cutoff 也排除 group 5/6/9 在此后的消息。
+- 夜盘支持 deferred；启用前必须建立交易日历映射并补真实数据回归。
 
 ## 验证命令
 
@@ -74,7 +77,7 @@ TWSE / TPEx 和 TAIFEX converter 均已完成主体实现与真实 dump 回归�
 ## 下一步
 
 检查 `/home/liuxiang/tmp` 下本轮 stock/future runner 的 summary 与逐日日志，汇总失败
-日期和受影响 symbol；只处理确认过的日盘输入，夜盘支持明确 deferred。
+日期和受影响 symbol；用日盘硬截止后的 converter 重跑 future，夜盘支持明确 deferred。
 
 ## 按需阅读
 

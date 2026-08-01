@@ -51,14 +51,17 @@ sequential dump reader
   -> I010 product catalog + I011 contract catalog
   -> per-symbol product sequence + order book state
   -> synchronous staged depth/basic CSV writer
-  -> exact EOF 后发布
+  -> 日盘截止或 exact EOF 后发布
 ```
 
 每条 frame 固定为 19-byte header、`body_length` bytes body、1-byte checksum 和
 `0D 0A`。checksum 是从 header 第二个 byte 到 body 最后一个 byte 的 XOR。
 converter 对 `ESC`、所有 BCD digit/time、body exact length、handled version、
 checksum 和 terminal code 做校验；错误包含 dump byte offset、transmission、kind、
-version、channel 和 channel sequence。
+version、channel 和 channel sequence。reader 处理到 `13:45:59.999999`；读到第一条
+`13:46:00` 或更晚的 header 后，在读取 body 前停止。该 header 及后续 bytes 不做
+frame 校验、不进入消息统计和状态，完成日志用 `day_cutoff_reached` 与
+`day_cutoff_offset` 记录边界。
 
 ## 已处理消息
 
@@ -89,11 +92,12 @@ outright 同时使用 I010 和对应 I011，并要求 decimal locator 一致。c
 spread 没有 I010，使用 symbol 前三字符匹配 I011，因而仍可正确解码 signed price
 和 multiplier。若 realtime 早于 metadata，禁止默认为 decimal 0：消息计入
 `metadata_missing_messages` 并跳过，按 symbol/message/sequence 记录问题；后续
-sequence gap 由 I083/I084 恢复。若直到 EOF 都没有 I011，仍发布其余合约的 CSV，
+sequence gap 由 I083/I084 恢复。若直到日盘截止或 EOF 都没有 I011，仍发布其余合约的 CSV，
 该 symbol 不产生 depth/basic-info 行。
 
-I010/I011 会在盘中轮播。影响输出的字段完全相同则去重并计数；同 symbol/kind 的
-字段发生冲突时转换失败。I012 也会轮播：严格校验两侧阶数、唯一 level、BCD 与
+I010/I011 会在盘中轮播。日盘截止前影响输出的字段完全相同则去重并计数；同
+symbol/kind 的字段发生冲突时转换失败。13:46 后的盘后基本资料完全不读取，因此不会
+覆盖日盘 reference price、flow group 或 close group。I012 也会轮播：严格校验两侧阶数、唯一 level、BCD 与
 exact body length；相同内容去重，内容变化记录 `price_limit_conflict` 并继续，
 不改写 I010 `reference_price`。I011 的 Big5/CP950 `NAME` 不解析、不输出。
 
@@ -168,8 +172,8 @@ I012 内容变化和 cache overflow 都记录到日志但不阻止当日其余�
 未知 handled version、非法 BCD/enum/level、checksum/trailer 和输出 I/O 错误仍使当日
 失败；批处理必须记录该日失败并继续下一日。
 
-两份输出先写同目录 `.partial.<pid>`。完整解码、EOF finalization、basic-info 排序和
-成功 close 后才发布；`--overwrite` 会先备份两份旧文件，并在进程内 rename 失败时
+两份输出先写同目录 `.partial.<pid>`。日盘范围完整解码、截止/EOF finalization、
+basic-info 排序和成功 close 后才发布；`--overwrite` 会先备份两份旧文件，并在进程内 rename 失败时
 回滚。两次 final rename 仍不构成断电级跨文件事务，下游只能在进程成功退出后消费。
 
 ## 与 Orion 的有意差异
@@ -190,7 +194,8 @@ I012 内容变化和 cache overflow 都记录到日志但不阻止当日其余�
 | gap cache | 保存 SHM buffer pointer，部分 empty/end 边界不安全 | 保存 decoded value；gap/overflow 形成日级问题摘要，不阻止其余 symbol 发布 |
 | I084 S | 未合并 recovery statistics | 按字段 sequence 合并，恢复缺失统计且不回滚较新事件 |
 | I012 | 未进入 offline research schema | 按 V1.5.1 严格解析/校验和分类计数，不误作 reference price 更新 |
-| frame 检查 | dump 路径不完整校验 checksum/terminal | 每条 frame 严格校验并原子保护旧输出 |
+| frame 检查 | dump 路径不完整校验 checksum/terminal | 日盘范围每条 frame 严格校验并原子保护旧输出 |
+| session cutoff | orderbook 默认 `end_building_time=13:45:59` | reader 在 `13:46:00` 硬停止，后续所有消息均不处理 |
 
 Aries 不是 Orion 40 列 stock-future CSV 的 byte-compatible 替代品；这是包含
 volume、multiplier、全部 futures 和明确恢复语义的新 research schema。
@@ -200,9 +205,10 @@ volume、multiplier、全部 futures 和明确恢复语义的新 research schema
 - V1.5.1 文档定义的 I010 body 为 32 bytes，20260707 真实 feed 为 version 9、
   40 bytes。当前只使用文档可确认的前 32 bytes，并要求真实 body 精确 40 bytes；
   未知扩展 8 bytes 不进入研究字段。
-- 当前正式 timestamp contract **仅支持日盘**，由 20260707 真实日盘验证。夜盘明确
-  暂不支持，不应执行正式转换，也不得把当前 CLI 生成的夜盘结果纳入研究数据集或
-  质量基线。CLI 目前不会自动识别并拒绝夜盘，因此调用方必须保证输入只含日盘。
+- 当前正式 timestamp contract **仅支持统一日盘窗口**：保留盘前资料及
+  `13:45:59.999999` 以前的消息，在第一条 `13:46:00` 或更晚的 frame header 处停止。
+  该窗口是项目研究 contract，不是按商品 `FLOW-GROUP` 建模；group 5/6/9 在截止后
+  仍处于一般交易时段的消息也明确排除。夜盘不得进入研究数据集或质量基线。
   以后启用夜盘前，必须先建立交易日到事件自然日的交易日历映射，覆盖周一交易日
   对应上周五夜盘等跨周边界，并补充真实夜盘回归与 timestamp 一致性测试。
 - gap 后 I084 可恢复 book 与 exchange summary，不能重建遗漏成交的精确累计 value；
@@ -215,19 +221,26 @@ volume、multiplier、全部 futures 和明确恢复语义的新 research schema
 输入归档为 `/data/tw/raw/future/taifex_20260707.dump.tar.gz`，压缩文件
 1,213,053,544 bytes，内部唯一 member `taifex_20260707.dump` 为
 6,005,844,926 bytes。使用当前 44 列/non-negative value contract 的 Release
-converter 完整 dry-run：
+converter 日盘 dry-run：
 
 ```text
-messages=62559197 depth_rows=54221272 symbols=4839
-i010=181201 i011=66096 i012=181280
-basic_duplicates=245178 i012_duplicates=179520 i012_conflicts=0 basic_rows=4839
-ignored=2315494 metadata_missing=9 sequence_gaps=4 unresolved_gaps=0
-stale=0 recoveries=4 cache_overflows=0 resets=0 bytes=6005844926
+messages=61605862 depth_rows=54086067 symbols=4839
+i010=154801 i011=56403 i012=154880
+basic_duplicates=209085 i012_duplicates=153120 i012_conflicts=0 basic_rows=4839
+ignored=2260130 metadata_missing=9 sequence_gaps=4 unresolved_gaps=0
+stale=0 recoveries=4 cache_overflows=0 resets=0 bytes=5640462381
+day_cutoff_reached=true day_cutoff_offset=5640462381
 ```
 
 9 条 metadata-before-basic 问题涉及 `TJFH6/L6`、`TJFL6`、`TJFG6`；4 个 gap
 涉及 `TJFG6`、`TJFL6`、`TJFH6`、`TJFH6/L6`，均已恢复。ignored message 已按
 transmission/kind 分项写入日志。
+
+边界回归另覆盖两个原失败日：`20260107` 在 offset `3980475962` 遇到
+`13:46:00.004000` 后停止，不再读取 14:40 的 I011 更新；`20260407` 在 offset
+`4022802576` 停止，不再触发 I010 更新冲突。`20260525` 与 `20260526` 的截断分别
+发生在约 13:05 的日盘范围内，因此仍按严格 frame contract 失败，不属于盘后过滤可
+恢复的情况。
 
 下表是 2026-08-01 schema/value 修改前的**历史输出**，只用于追溯初版 converter，
 不得作为当前 44 列/non-negative value contract 的 hash 基线：

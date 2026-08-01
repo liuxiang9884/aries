@@ -111,6 +111,12 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
       throw std::runtime_error(
           fmt::format("TAIFEX message at byte {}: {}", offset, error.what()));
     }
+    if (header.exchange_time_ns >=
+        protocol::kDaySessionEndExclusiveNanoseconds) {
+      stats.day_session_cutoff_reached = true;
+      stats.day_session_cutoff_offset = offset;
+      break;
+    }
     try {
       body.resize(header.body_length);
       input.read(reinterpret_cast<char *>(body.data()),

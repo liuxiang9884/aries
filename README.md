@@ -59,7 +59,7 @@ schema 与时间语义见 `data/docs/data.md`，协议核对和 Orion 差异见
 ## TAIFEX Futures Dump 转换
 
 `taifex_dump_converter` 同步解析 TAIFEX futures I010/I011 与
-I024/I025/I081/I083/I084，把全部 outright 和 calendar spread 输出为 45 列
+I024/I025/I081/I083/I084，把全部 outright 和 calendar spread 输出为 44 列
 depth CSV 与 27 列 basic-info CSV：
 
 ```bash
@@ -73,4 +73,5 @@ depth CSV 与 27 列 basic-info CSV：
 只校验不输出时使用 `--dry-run`。默认拒绝覆盖，明确传入 `--overwrite` 才会在
 完整成功后替换已有的两份 CSV。schema、multiplier/value 口径、sequence recovery、
 已知边界和 Orion 差异见 `data/converter/docs/taifex.md`。当前正式 contract 仅支持
-日盘；夜盘暂不转换，也不得进入正式研究数据集。
+统一日盘窗口，reader 在第一条 `13:46:00` 消息处停止；夜盘暂不转换，也不得进入
+正式研究数据集。

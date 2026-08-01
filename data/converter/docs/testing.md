@@ -142,7 +142,8 @@ ctest --test-dir build/debug --output-on-failure -R 'Taifex|taifex'
 high/low、I081 顺序更新、I083 全量清空、I084 gap recovery、I002 reset、零价
 spread 开盘、snapshot statistics 防回滚/安全合并、未恢复 gap 与永久 metadata
 缺失的问题摘要/继续发布、单 symbol cache overflow 隔离、checksum、truncated
-trailer、dry-run 和双 CSV 原子发布。
+trailer、13:45:59 inclusive / 13:46 exclusive 日盘硬截止、dry-run 和双 CSV
+原子发布。
 
 ## TAIFEX 完整 Dump 验证
 
@@ -163,11 +164,12 @@ trailer、dry-run 和双 CSV 原子发布。
 成功日志应包含：
 
 ```text
-messages=62559197 depth_rows=54221272 symbols=4839
-i010=181201 i011=66096 i012=181280
-basic_duplicates=245178 i012_duplicates=179520 i012_conflicts=0 basic_rows=4839
-ignored=2315494 metadata_missing=9 sequence_gaps=4 unresolved_gaps=0
-stale=0 recoveries=4 cache_overflows=0 resets=0 bytes=6005844926
+messages=61605862 depth_rows=54086067 symbols=4839
+i010=154801 i011=56403 i012=154880
+basic_duplicates=209085 i012_duplicates=153120 i012_conflicts=0 basic_rows=4839
+ignored=2260130 metadata_missing=9 sequence_gaps=4 unresolved_gaps=0
+stale=0 recoveries=4 cache_overflows=0 resets=0 bytes=5640462381
+day_cutoff_reached=true day_cutoff_offset=5640462381
 ```
 
 完整 CSV 另用独立扫描检查：depth header/每行为 44 列、basic-info 为 27 列，

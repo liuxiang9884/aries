@@ -83,6 +83,38 @@ TEST_F(TaifexDumpConverterTest, ConvertsAndPublishesDepthAndBasicCsv) {
             std::string::npos);
 }
 
+TEST_F(TaifexDumpConverterTest,
+       StopsAfterDaySessionWithoutProcessingLaterFrames) {
+  std::vector<std::uint8_t> dump;
+  const auto kind = test::MakeI011("TXF", 200.0);
+  test::AppendFrame(dump, '1', '3', 4, kind);
+  const auto basic = test::MakeI010("TXFG6", 22'000'00);
+  test::AppendFrame(dump, '1', '1', 9, basic, 2);
+  const auto update = test::MakeI081(
+      "TXFG6", 1, '0',
+      {.type = '0', .price = 22'099'00, .volume = 7, .level = 1});
+  test::AppendFrame(dump, '2', 'A', 1, update, 3, 134'559'999'999ULL);
+  const auto after_hours_basic = test::MakeI010("TXFG6", 23'000'00);
+  test::AppendFrame(dump, '1', '1', 9, after_hours_basic, 4,
+                    144'000'000'000ULL);
+  dump.insert(dump.end(), {0x1B, 0x31, 0x31});
+  test::WriteBinaryFile(dump_path_, dump);
+
+  const auto stats = ConvertDump(Options());
+
+  EXPECT_EQ(stats.messages_read, 3);
+  EXPECT_EQ(stats.rows_written, 1);
+  EXPECT_EQ(stats.basic_info_rows, 1);
+  EXPECT_TRUE(stats.day_session_cutoff_reached);
+  EXPECT_EQ(stats.day_session_cutoff_offset, stats.bytes_read);
+  EXPECT_LT(stats.bytes_read, dump.size());
+  std::ifstream basic_input(basic_output_path_, std::ios::binary);
+  const std::string basic_csv((std::istreambuf_iterator<char>(basic_input)),
+                              {});
+  EXPECT_NE(basic_csv.find(",22000.000000,"), std::string::npos);
+  EXPECT_EQ(basic_csv.find(",23000.000000,"), std::string::npos);
+}
+
 TEST_F(TaifexDumpConverterTest, InvalidChecksumKeepsExistingOutputs) {
   std::vector<std::uint8_t> dump;
   const auto kind = test::MakeI011("TXF", 200.0);

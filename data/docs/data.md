@@ -256,16 +256,17 @@ depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正�
   --dry-run
 ```
 
-converter 完整读取 62,559,197 条消息，模拟输出 54,221,272 条 depth 数据行；处理
-181,201 条 I010、66,096 条 I011 与 181,280 条 I012。I010/I011 一致重复为
-245,178 条，I012 一致重复为 179,520 条、冲突为 0，basic-info 为 4,839 条。
+converter 在第一条 `13:46:00` 消息前读取 61,605,862 条消息，模拟输出
+54,086,067 条 depth 数据行；处理 154,801 条 I010、56,403 条 I011 与 154,880 条
+I012。I010/I011 一致重复为 209,085 条，I012 一致重复为 153,120 条、冲突为 0，
+basic-info 为 4,839 条。
 9 条 realtime 在 metadata 前到达；4 个 product sequence gap 全部恢复，没有 stale、
-EOF 未恢复 gap 或 cache overflow。ignored 总数为 2,315,494，并按
+截止前没有未恢复 gap 或 cache overflow。ignored 总数为 2,260,130，并按
 transmission/message kind 分项记录。
 
 metadata-before-basic 涉及 `TJFH6/L6`、`TJFL6`、`TJFG6`；gap 涉及
-`TJFG6`、`TJFL6`、`TJFH6`、`TJFH6/L6`。完整 dry-run 成功，wall time
-1:53.56，最大 RSS 270,316 KiB。
+`TJFG6`、`TJFL6`、`TJFH6`、`TJFH6/L6`。日盘 dry-run 在 offset
+`5,640,462,381` 命中截止并成功，wall time 10.84 秒，最大 RSS 270,456 KiB。
 
 下表是 2026-08-01 schema/value 修改前的历史 Aries 输出，不是当前 44 列、
 `abs(price) * volume * multiplier` contract 的 hash 基线：
@@ -305,7 +306,8 @@ publication status 使用。
 
 - 为 raw、dump、csv、后续 parquet / binary 研究数据确定统一目录约定，避免 `/data/tw/raw` 与 `/home/liuxiang/data/raw` 长期并存而语义不清。
 - 建立数据 manifest：数据类型、交易日、来源、远端路径、本地路径、大小、hash、生成命令、生成时间和质量检查状态。
-- TAIFEX 当前只允许正式转换日盘。夜盘支持 deferred；未来启用前必须建立交易日到
+- TAIFEX 当前只允许正式转换统一日盘窗口；reader 在第一条 `13:46:00` 消息处停止。
+  夜盘支持 deferred；未来启用前必须建立交易日到
   事件自然日的交易日历映射，并补真实夜盘回归和 timestamp 一致性检查。
 - 为 TAIFEX/TWSE 输出建立 manifest 与明确 schema version，记录输入 hash、工具
   commit、输出 hash、质量统计和交易日/symbol 问题摘要。

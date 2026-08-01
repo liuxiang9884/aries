@@ -55,7 +55,7 @@ VCPKG_ROOT=/home/liuxiang/vcpkg ctest --preset debug
 ## 下一步
 
 建立数据 manifest/version contract，并继续讨论 TAIFEX 缺口数据的下游使用规则。
-TAIFEX 当前只处理确认过的日盘输入；夜盘支持暂缓。
+TAIFEX reader 在第一条 `13:46:00` 消息处停止，只发布统一日盘窗口；夜盘支持暂缓。
 
 ## 按需阅读
 

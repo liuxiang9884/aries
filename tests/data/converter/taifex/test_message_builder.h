@@ -240,11 +240,12 @@ MakeI084Statistics(std::string_view symbol, std::uint64_t last_price,
 inline void AppendFrame(std::vector<std::uint8_t> &dump, char transmission,
                         char kind, std::uint8_t version,
                         std::span<const std::uint8_t> body,
-                        std::uint64_t channel_sequence = 1) {
+                        std::uint64_t channel_sequence = 1,
+                        std::uint64_t information_time = 90'000'000'000ULL) {
   std::vector<std::uint8_t> header{0x1B,
                                    static_cast<std::uint8_t>(transmission),
                                    static_cast<std::uint8_t>(kind)};
-  AppendBcd(header, 90'000'000'000ULL, 6);
+  AppendBcd(header, information_time, 6);
   AppendBcd(header, 1, 2);
   AppendBcd(header, channel_sequence, 5);
   AppendBcd(header, version, 1);

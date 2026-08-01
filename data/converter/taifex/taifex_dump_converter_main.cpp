@@ -63,7 +63,8 @@ int main(int argc, char **argv) {
         "i010={} i011={} i012={} basic_duplicates={} i012_duplicates={} "
         "i012_conflicts={} basic_rows={} ignored={} metadata_missing={} "
         "sequence_gaps={} unresolved_gaps={} stale={} recoveries={} "
-        "cache_overflows={} resets={} bytes={} dry_run={}",
+        "cache_overflows={} resets={} bytes={} day_cutoff_reached={} "
+        "day_cutoff_offset={} dry_run={}",
         stats.messages_read, stats.rows_written, stats.symbols_seen,
         stats.product_basic_messages, stats.contract_basic_messages,
         stats.price_limit_messages, stats.basic_duplicates,
@@ -72,7 +73,9 @@ int main(int argc, char **argv) {
         stats.metadata_missing_messages, stats.sequence_gaps,
         stats.unresolved_sequence_gaps, stats.stale_messages,
         stats.snapshot_recoveries, stats.gap_cache_overflows,
-        stats.reset_messages, stats.bytes_read, dry_run);
+        stats.reset_messages, stats.bytes_read,
+        stats.day_session_cutoff_reached, stats.day_session_cutoff_offset,
+        dry_run);
     for (const auto &count : stats.ignored_message_counts) {
       NOVA_INFO(
           "TAIFEX ignored message summary: trading_day={} transmission={} "
