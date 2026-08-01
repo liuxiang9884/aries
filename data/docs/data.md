@@ -286,6 +286,21 @@ symbol 排序且唯一、multiplier 全部大于 0。43,388 行包含负 signed 
 与 hash 基线。TAIFEX schema、multiplier/value 口径、恢复语义、Orion 差异和夜盘边界见
 `data/converter/docs/taifex.md`。
 
+TWSE 历史重建采用 `data/converter/scripts/rebuild_twse_csv`，raw dump 保留在
+`/tw_backup/data/tw/raw/stock/`，CSV 成对写入 `/tw_backup/data/tw/csv/stock/`。
+2026-08-01 已验证并发布三个旧失败日：
+
+| 日期 | publication | depth 行 | basic-info 行 | 问题 |
+|---|---|---:|---:|---|
+| 2025-09-09 | `published_partial` | 8,861,899 | 45,380 | 3 个 format1 cycle mismatch |
+| 2025-09-25 | `published_partial` | 4,075,957 | 45,657 | offset `797405152` 跳过 32 bytes；`2603` 后续隔离 |
+| 2025-10-14 | `published_partial` | 2,541,590 | 45,790 | offset `554258381` 跳过 51 bytes；`1256` 后续隔离 |
+
+三天 depth 全文件检查均为 23 列、`total_value` 非负且按 symbol 不回退；basic-info
+均为 30 列、主键无重复且 multiplier 全部大于 0。局部损坏后的受影响 symbol 不再
+输出，因此该 symbol 的当日文件只包含损坏前的可信前缀；研究时必须结合逐日日志和
+publication status 使用。
+
 ## 未完成事项
 
 - 为 raw、dump、csv、后续 parquet / binary 研究数据确定统一目录约定，避免 `/data/tw/raw` 与 `/home/liuxiang/data/raw` 长期并存而语义不清。

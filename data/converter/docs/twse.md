@@ -96,8 +96,9 @@ filter mode 语义不变。
 
 - `stock_entries` 为空才是证券记录；`AL` / `NE` 是循环控制记录，不写 CSV。
 - dump 可能从发布循环中段开始。每个 market 的首个 `AL` / `NE` 只用于建立
-  周期边界；从下一完整周期起，控制记录中的 ASCII 数量必须等于该周期实际收到
-  的 format1 正常记录数，否则转换失败。
+  周期边界；从下一完整周期起比较控制记录中的 ASCII 数量与该周期实际收到的
+  format1 正常记录数。二者不一致时记录 service、`AL` / `NE`、expected、actual、
+  missing、offset 与 sequence，转换继续并把当日标为 `published_partial`。
 - 同主键且全部输出字段一致的重复记录忽略并计数。
 - 同主键任一输出字段变化时转换失败，错误包含旧/新 byte offset、sequence 和
   字段差异。format1 没有足以安全决定 last-wins 的事件时间，禁止静默覆盖，
@@ -131,19 +132,19 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
 | 输入配置 | TOML；`trading_day` 缺省时取当天 | CLI 直接要求 `--trading-day`、`--dump`，非 dry-run 要求 `--output` 与 `--basic-output` | 让 offline 任务参数显式、可复现 |
 | 交易日起点 | Nova `mktime`，依赖进程时区 | 固定 UTC+8 自然日零点 | 避免服务器时区改变 timestamp |
 | wire 表达 | packed struct、bitfield、`reinterpret_cast` | byte span、显式 offset 和 mask | 消除 ABI、对齐和 bitfield 顺序依赖 |
-| frame 校验 | 按 header length 读取，不核对 XOR、terminal 或最小 trailer | 每条消息校验长度、XOR checksum、`0D 0A` terminal | 损坏输入失败，不静默生成 CSV |
+| frame 校验 | 按 header length 读取，不核对 XOR、terminal 或最小 trailer | 每条消息校验长度、XOR checksum、`0D 0A` terminal；损坏后只向前扫描最多 1 MiB，并要求候选 frame 完整通过全部校验 | 发布错误前的可信数据，并在可安全重同步时继续未受影响 symbol；不静默接受损坏 frame |
 | BCD 校验 | nibble 直接参与计算 | 拒绝非十进制 nibble、非法时间与溢出 | 防止错误数字进入时间和价格 |
 | 协议版本 | 不检查 `service_type` / `format_version` | 只接受 service 01/02；已处理 format 只接受文档版本 9/4/1 | 新版 layout 未审查前不静默误解码 |
 | 动态档位 | 根据 bitfield 直接遍历 | 先验证最多五档及精确动态 body 长度 | 避免越界或错位读取 |
 | 结束控制消息 | `000000` 会被 `warrant` / `all` filter 接受，随后把 `999999999999` 当时间 | 所有 mode 都先忽略协议定义的结束控制消息 | 修复 `warrant` / `all` 完整 dump 末尾失败；有效行情不变 |
 | mode 拼写 | 未知字符串退回 `stock` | CLI 和 parser 都拒绝未知 mode | 防止拼写错误生成错误资产池 |
-| 输出发布 | writer 直接打开目标文件 | 同目录 `.partial.<pid>` 写完并成功 close 后 rename；默认拒绝覆盖，`--overwrite` 才替换 | 失败时不发布半文件，降低误覆盖风险 |
+| 输出发布 | writer 直接打开目标文件 | depth/basic-info 同时写入同目录 `.partial.<pid>`，完成后成对 rename；局部质量问题允许发布可信子集 | 兼顾研究数据可用性与问题可追溯性；不可恢复的全局错误仍保留旧输出 |
 | 异常上下文 | 多数解析路径没有输入 byte offset | 错误包含 message 起始 byte offset | 便于定位损坏 dump |
 | format1 输出 | 只更新 depth 内部状态 | 另生成 30 列、去重且排序的 basic-info CSV | 保留可研究的证券与权证基础资料 |
-| format1 控制 | `AL` / `NE` 可能成为 pseudo symbol | 识别控制记录，并在首轮同步后校验每个完整周期数量 | 防止计数记录污染证券状态并检测丢包 |
+| format1 控制 | `AL` / `NE` 可能成为 pseudo symbol | 识别控制记录，并在首轮同步后校验每个完整周期数量；mismatch 记录后继续 | 防止计数记录污染证券状态，检测并显式暴露丢包，同时保留其余可信数据 |
 | format1 重复 | 同 symbol 后到状态覆盖 | 相同记录去重；字段变化即失败并报告 diff | format1 无安全的 last-wins 时间语义 |
 | `total_value` | `delta_volume * last_price`，未乘交易单位 | 一般交易累计 `delta_volume * last_price * multiplier`；odd-lot 的 wire volume 已是实际证券数量，有效乘数为 1 | 统一为实际币种成交额；depth CSV 不再与 Orion byte-compatible |
-| CLI 日志 | 工具原有输出方式 | outer CLI 使用 Nova `INFO` / `ERROR`；core 通过异常传递 | 错误只记录一次且保持统一日志设施 |
+| CLI 日志 | 工具原有输出方式 | outer CLI 使用 Nova `INFO` / `WARNING` / `ERROR`；core 返回结构化质量统计或通过异常传递全局错误 | 每个 recoverable issue 和最终 publication status 都可由 runner 收集 |
 
 2026-07-07 的旧验证曾证明修改前 depth CSV 与 Orion bytes 完全一致；该 hash 只
 作为历史基线。自 2026-08-01 起 `total_value` 纳入 format1 `multiplier`，因此新
@@ -151,14 +152,36 @@ depth CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不变�
 
 `total_value` 不是交易所直接提供的字段。一般交易按相邻消息累计量差、当前成交价
 和 format1 multiplier 计算，币种来自 basic-info `currency`；若成交量变化前尚未
-收到 multiplier metadata，转换失败而不是默认乘数。format 23 odd-lot 的 volume
-已经是实际证券数量，因此不再乘标准交易单位。
+收到 multiplier metadata，不伪造乘数或成交额，该 symbol 从此不再输出 depth，
+并在日志中记录 `missing_multiplier`。format 23 odd-lot 的 volume 已经是实际证券
+数量，因此不再乘标准交易单位。
+
+## Best-effort 恢复与发布 contract
+
+- 非 dry-run 始终把 depth 与 basic-info 作为同一 generation 成对发布；某一类没有
+  可输出记录时，对应文件只包含稳定 header。
+- frame header、长度、checksum 或 terminal 失败后，从错误 offset 的下一 byte 开始
+  向前扫描最多 1 MiB。候选位置必须完整通过 header、长度、checksum 和 terminal
+  校验才是重同步点；未找到时停止读取后缀，但仍可发布此前的可信前缀。
+- 如果损坏 frame 的 body 能提供可打印的 symbol，converter 将该 symbol 标记为
+  invalidated，重同步后不再输出它的 depth。这样不会用跨缺口的累计 volume 和未知
+  成交价继续计算错误的 `total_value`；其他 symbol 继续转换。
+- format1 cycle mismatch、局部 frame recovery 和 missing multiplier 都是可恢复质量
+  问题，最终状态为 `published_partial`。没有上述问题时为 `published_complete`。
+- 如果非空 dump 中连一条通过 frame 校验并成功处理的消息都没有，不发布只有 header
+  的新文件。format1 同主键字段冲突等无法安全决定状态的语义错误仍使转换失败，并
+  保留既有成对输出。
+- `data/converter/scripts/rebuild_twse_csv` 通过 converter exit status、最终日志状态
+  以及两份输出 inode 是否在本轮同时变化判定发布结果，区分
+  `published_complete`、`published_partial`、`preserved_previous` 和
+  `not_published`，不会再把预先存在的 CSV 当成本轮成功。
 
 ## 当前验证边界
 
 - 上市和上柜 format 1 offset 分别有 fixture；TPEx format 1 + format 6 已有
   端到端 CSV 测试。
 - format 6 / 17 / 22 / 23、五种 mode、checksum、trailer、截断、超过五档、
+  有界重同步、受影响 symbol 隔离、缺失 multiplier、双文件 best-effort 发布、
   原子发布和 symlink 边界均有 focused tests。
 - 2026-07-07 stock dump 含 listed 与 OTC stream，严格 checksum / version /
   service 校验下可完整读取 25,993,761 条消息并生成 15,886,026 条数据行。

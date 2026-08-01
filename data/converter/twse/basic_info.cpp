@@ -311,13 +311,14 @@ BasicInfoCatalog::Process(const MessageHeader &header,
   if (!decoded.record.has_value()) {
     if (cycle_synchronized_[service_index] &&
         cycle_messages_[service_index] != decoded.control_count) {
-      throw std::runtime_error(fmt::format(
-          "format1 cycle count mismatch service={} kind={} expected={} "
-          "actual={} offset={} sequence={}",
-          static_cast<unsigned>(header.service_type),
-          decoded.control_kind == BasicInfoControlKind::kAll ? "AL" : "NE",
-          decoded.control_count, cycle_messages_[service_index], offset,
-          header.sequence));
+      cycle_mismatches_.push_back(BasicInfoCycleMismatch{
+          .service_type = header.service_type,
+          .control_kind = decoded.control_kind,
+          .expected = decoded.control_count,
+          .actual = cycle_messages_[service_index],
+          .offset = offset,
+          .sequence = header.sequence,
+      });
     }
     cycle_messages_[service_index] = 0;
     cycle_synchronized_[service_index] = true;

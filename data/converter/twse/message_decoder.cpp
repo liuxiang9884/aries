@@ -308,9 +308,17 @@ void MessageDecoder::ApplyBasicInfo(const BasicInfoRecord &basic_info) {
   record->high_limit = basic_info.high_limit;
   record->low_limit = basic_info.low_limit;
   if (basic_info.multiplier == 0) {
-    throw std::runtime_error("TWSE basic-info multiplier must be positive");
+    missing_multiplier_symbols_.insert(record->symbol);
+    invalidated_symbols_.insert(record->symbol);
+    return;
   }
   record->multiplier = basic_info.multiplier;
+}
+
+void MessageDecoder::InvalidateSymbol(std::string symbol) {
+  if (!symbol.empty()) {
+    invalidated_symbols_.insert(std::move(symbol));
+  }
 }
 
 void MessageDecoder::ProcessOddLotBasicInfo(
@@ -364,6 +372,24 @@ MessageDecoder::ProcessDepth(const MessageHeader &header,
     return nullptr;
   }
 
+  if (invalidated_symbols_.contains(record->symbol)) {
+    ++invalidated_symbol_messages_;
+    return nullptr;
+  }
+
+  const auto total_volume_offset = odd_lot ? protocol::kOddLotTotalVolumeOffset
+                                           : protocol::kStockTotalVolumeOffset;
+  const auto total_volume = static_cast<std::int64_t>(
+      DecodeBcdInteger(body.subspan(total_volume_offset, volume_size)));
+  if (!odd_lot && record->multiplier == 0) {
+    missing_multiplier_symbols_.insert(record->symbol);
+    ++missing_multiplier_messages_;
+    if (total_volume != 0) {
+      invalidated_symbols_.insert(record->symbol);
+    }
+    return nullptr;
+  }
+
   record->exchtime =
       trading_day_start_ns_ +
       DecodeBcdTimeNanoseconds(body.subspan(protocol::kDepthTimeOffset, 6));
@@ -392,15 +418,6 @@ MessageDecoder::ProcessDepth(const MessageHeader &header,
     record->total_trade = 0;
   }
 
-  const auto total_volume_offset = odd_lot ? protocol::kOddLotTotalVolumeOffset
-                                           : protocol::kStockTotalVolumeOffset;
-  const auto total_volume = static_cast<std::int64_t>(
-      DecodeBcdInteger(body.subspan(total_volume_offset, volume_size)));
-  if (!odd_lot && total_volume != record->total_volume &&
-      record->multiplier == 0) {
-    throw std::runtime_error(
-        "stock volume changed before multiplier metadata arrived");
-  }
   const auto effective_multiplier =
       odd_lot ? std::uint64_t{1} : record->multiplier;
   record->total_value +=

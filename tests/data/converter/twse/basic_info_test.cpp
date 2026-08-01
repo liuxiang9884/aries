@@ -165,7 +165,7 @@ TEST(BasicInfoCatalogTest, IgnoresIdenticalDuplicatesAndRejectsFieldChanges) {
   }
 }
 
-TEST(BasicInfoCatalogTest, ValidatesAllAndNewCycleCounts) {
+TEST(BasicInfoCatalogTest, RecordsAllAndNewCycleCountMismatches) {
   BasicInfoCatalog catalog(20260707);
   const auto first = test::MakeBasicInfo(test::BasicInfoFields{});
   const auto second =
@@ -181,8 +181,16 @@ TEST(BasicInfoCatalogTest, ValidatesAllAndNewCycleCounts) {
 
   const auto bad_control = test::MakeBasicControl("000001", "NE");
   header.sequence = 4;
-  EXPECT_THROW((void)catalog.Process(header, bad_control, 342),
-               std::runtime_error);
+  EXPECT_EQ(catalog.Process(header, bad_control, 342), nullptr);
+  EXPECT_EQ(catalog.control_records(), 2);
+  ASSERT_EQ(catalog.cycle_mismatches().size(), 1);
+  const auto &issue = catalog.cycle_mismatches().front();
+  EXPECT_EQ(issue.service_type, ServiceType::kListed);
+  EXPECT_EQ(issue.control_kind, BasicInfoControlKind::kNew);
+  EXPECT_EQ(issue.expected, 1);
+  EXPECT_EQ(issue.actual, 0);
+  EXPECT_EQ(issue.offset, 342);
+  EXPECT_EQ(issue.sequence, 4);
 }
 
 TEST(BasicInfoCatalogTest, FirstControlSynchronizesAPartialCapture) {

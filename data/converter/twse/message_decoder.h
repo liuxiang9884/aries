@@ -43,8 +43,23 @@ public:
 
   void ApplyBasicInfo(const BasicInfoRecord &basic_info);
 
+  void InvalidateSymbol(std::string symbol);
+
   [[nodiscard]] std::size_t symbol_count() const noexcept {
     return records_.size();
+  }
+
+  [[nodiscard]] std::uint64_t missing_multiplier_messages() const noexcept {
+    return missing_multiplier_messages_;
+  }
+
+  [[nodiscard]] std::uint64_t invalidated_symbol_messages() const noexcept {
+    return invalidated_symbol_messages_;
+  }
+
+  [[nodiscard]] const std::unordered_set<std::string> &
+  missing_multiplier_symbols() const noexcept {
+    return missing_multiplier_symbols_;
   }
 
 private:
@@ -65,6 +80,10 @@ private:
   SymbolFilterMode mode_;
   std::unordered_map<std::string, DepthRecord> records_;
   std::unordered_set<std::string> warrant_symbols_;
+  std::unordered_set<std::string> invalidated_symbols_;
+  std::unordered_set<std::string> missing_multiplier_symbols_;
+  std::uint64_t missing_multiplier_messages_{};
+  std::uint64_t invalidated_symbol_messages_{};
 };
 
 } // namespace aries::data::twse

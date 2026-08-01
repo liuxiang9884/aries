@@ -21,9 +21,10 @@ ctest --test-dir build/debug \
 - header、TWSE listed / TPEx service、format 1 / 6 / 17 / 22 / 23、协议
   version、五种 filter mode 和 UTC+8 `trading_day`。
 - 非法 service / version / BCD / checksum / 日期、short body、超过五档、
-  截断 dump 和结束控制 symbol。
+  截断 dump、有界 frame 重同步、受影响 symbol 隔离和结束控制 symbol。
 - depth / basic-info CSV 内容、multiplier 与 odd-lot value 单位、dry-run、默认
-  拒绝覆盖、双文件旧版本保护、partial symlink / 目录防护和发布回滚。
+  拒绝覆盖、缺失 multiplier 隔离、best-effort 双文件发布、双文件旧版本保护、
+  partial symlink / 目录防护和发布回滚。
 
 ## 完整 Dump Dry-run
 
@@ -38,10 +39,32 @@ ctest --test-dir build/debug \
 成功日志应包含：
 
 ```text
-messages=25993761 depth_rows=15886026 depth_symbols=1979
+status=validated messages=25993761 depth_rows=15886026 depth_symbols=1979
 basic_messages=1145472 basic_controls=167 basic_duplicates=1104631
-basic_rows=40841 bytes=3153093917 dry_run=true
+basic_rows=40841 cycle_mismatches=0 frame_errors=0
+missing_multiplier_messages=0 bytes=3153093917 dry_run=true
 ```
+
+## TWSE 历史批量重建
+
+待处理日期文件每行一个 `YYYYMMDD`。runner 优先使用 `/tw_backup` 中已存在的非空
+dump；否则校验并解压 `/data/tw/raw/stock` 中的归档，解压后的 dump 保留。示例：
+
+```bash
+data/converter/scripts/rebuild_twse_csv \
+  --converter "$PWD/build/release/data/converter/twse_dump_converter" \
+  --dates-file /home/liuxiang/tmp/<run>/dates.txt \
+  --run-dir /home/liuxiang/tmp/<run>/logs
+```
+
+默认输出到 `/tw_backup/data/tw/csv/stock/`。summary 每个日期只写一行，并分别记录
+`result` 与 `publication`；成功必须同时满足 converter exit status 为 0、本轮两份
+输出 inode 都发生变化以及日志含 `published_complete` 或 `published_partial`。
+已有输出未变化只能记为 `preserved_previous`。
+
+零字节 dump 需要通过 `--non-trading-days-file` 提供已经确认的休市日期清单。清单中
+的日期记为 `non_trading_day`；其他零字节输入保守记为 `empty_input`。损坏归档记为
+`input_corrupt`，不覆盖已有 CSV，批处理继续下一日。
 
 ## 历史 Orion 对照与当前验证
 

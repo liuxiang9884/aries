@@ -205,7 +205,7 @@ TEST(MessageDecoderTest, UsesFormat1MetadataForNonstandardWarrantSymbol) {
   EXPECT_NEAR(record->total_value, 8'610.0, 1e-9);
 }
 
-TEST(MessageDecoderTest, RejectsVolumeBeforeMultiplierMetadata) {
+TEST(MessageDecoderTest, InvalidatesSymbolWithVolumeBeforeMultiplierMetadata) {
   MessageDecoder decoder(20260707, SymbolFilterMode::kStock);
   constexpr std::array<Level, 1> kTrade{{
       {.price = 950000, .volume = 1},
@@ -213,10 +213,23 @@ TEST(MessageDecoderTest, RejectsVolumeBeforeMultiplierMetadata) {
   const auto depth =
       test::MakeDepth("2330", 90000000000, 1, true, 0, 0, kTrade);
 
-  EXPECT_THROW((void)decoder.Process(
-                   test::MakeHeader(MessageType::kStockDepthV, depth.size()),
-                   depth),
-               std::runtime_error);
+  EXPECT_EQ(
+      decoder.Process(test::MakeHeader(MessageType::kStockDepthV, depth.size()),
+                      depth),
+      nullptr);
+  EXPECT_EQ(decoder.missing_multiplier_messages(), 1);
+  EXPECT_TRUE(decoder.missing_multiplier_symbols().contains("2330"));
+
+  const auto basic = test::MakeStockBasic("2330", 900000, 990000, 810000);
+  EXPECT_EQ(
+      decoder.Process(
+          test::MakeHeader(MessageType::kStockBasicInfo, basic.size()), basic),
+      nullptr);
+  EXPECT_EQ(
+      decoder.Process(
+          test::MakeHeader(MessageType::kStockDepthV, depth.size(), 2), depth),
+      nullptr);
+  EXPECT_EQ(decoder.invalidated_symbol_messages(), 1);
 }
 
 TEST(MessageDecoderTest, PreservesOrionSymbolFilterSemantics) {

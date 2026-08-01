@@ -61,6 +61,15 @@ struct DecodedBasicInfo {
   std::uint64_t control_count{};
 };
 
+struct BasicInfoCycleMismatch {
+  ServiceType service_type{ServiceType::kListed};
+  BasicInfoControlKind control_kind{BasicInfoControlKind::kNone};
+  std::uint64_t expected{};
+  std::uint64_t actual{};
+  std::uint64_t offset{};
+  std::uint64_t sequence{};
+};
+
 [[nodiscard]] DecodedBasicInfo
 DecodeBasicInfo(std::int32_t trading_day, const MessageHeader &header,
                 std::span<const std::uint8_t> body);
@@ -89,6 +98,11 @@ public:
     return identical_duplicates_;
   }
 
+  [[nodiscard]] const std::vector<BasicInfoCycleMismatch> &
+  cycle_mismatches() const noexcept {
+    return cycle_mismatches_;
+  }
+
 private:
   using Key = std::tuple<std::int32_t, std::string, std::string>;
 
@@ -105,6 +119,7 @@ private:
   std::uint64_t normal_messages_{};
   std::uint64_t control_records_{};
   std::uint64_t identical_duplicates_{};
+  std::vector<BasicInfoCycleMismatch> cycle_mismatches_;
 };
 
 } // namespace aries::data::twse

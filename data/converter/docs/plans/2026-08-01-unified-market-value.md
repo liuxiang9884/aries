@@ -32,9 +32,9 @@
 
 ## TWSE 批量问题处理决定
 
-以下是 2026-08-01 全量重建暴露问题后的处理 contract。当前先记录决定，待股票
-问题全部讨论完成后统一实现、测试和重跑；不要把本节误读为当前 converter 已具备的
-行为。
+以下是 2026-08-01 全量重建暴露问题后的处理 contract。该 contract 已在 TWSE
+converter 与 `data/converter/scripts/rebuild_twse_csv` 中实现；长期行为说明以
+`data/converter/docs/twse.md` 为事实源。
 
 已锁定：
 
@@ -55,19 +55,30 @@
   `non_trading_day` 并正常结束、不生成 CSV；正常交易日标为 `empty_input`，不生成
   CSV并加入重新下载清单。
 
-待真实数据验证后锁定：
+真实数据验证后已锁定：
 
 - `20250925`、`20251014` 的 format6 frame 同时存在 terminal、checksum 和下一
-  header 失步。先实现有扫描上限且要求完整 frame 校验的显式 recovery 实验模式，
-  重同步到下一条可信 frame，生成 scratch depth/basic CSV；检查受影响 symbol、
-  sequence、volume、`total_value`、列数和全日问题摘要。验证通过后按 best-effort
-  contract 成对发布两个 CSV，并把跳过的 byte range、frame 和受影响 symbol 记录为
-  `published_partial`；只有无法恢复出任何可信记录时才不发布新文件。
+  header 失步。converter 使用扫描上限且要求完整 frame 校验的 recovery，重同步到
+  下一条可信 frame；受影响 symbol 在损坏点后停止输出，其他 symbol 继续。按
+  best-effort contract 成对发布两个 CSV，并把跳过的 byte range、frame 和受影响
+  symbol 记录为 `published_partial`；只有无法恢复出任何可信记录时才不发布新文件。
 - 初版 runner 曾把保留的旧 CSV 当作转换成功，导致 `20250909`、`20250911` 被误标
-  success；统一实现时修正 summary，并重新转换、尽可能成对发布两个 CSV。summary
-  必须区分 `published_complete`、`published_partial`、`preserved_previous` 和
-  `not_published`；converter exit status、本次 staged 文件和原子 rename 共同决定本轮
-  发布结果，预先存在的文件只能记为 `preserved_previous`，不能证明本轮成功。
+  success；新 runner 的 summary 区分 `published_complete`、`published_partial`、
+  `preserved_previous` 和 `not_published`。converter exit status、本次两份输出 inode
+  与最终日志共同决定本轮发布结果；预先存在的文件只能记为
+  `preserved_previous`，不能证明本轮成功。
+
+真实数据结果：
+
+- `20250909` 完整读取 1,700,507,417 bytes，记录 3 个 format1 cycle mismatch，
+  成对发布 8,861,899 行 depth 与 45,380 行 basic-info。
+- `20250925` 在 offset `797405152` 跳过 32 bytes 后重同步，受影响 symbol 为
+  `2603`；其最后发布 sequence 为 `4244787`，早于损坏 frame `4244794`。
+- `20251014` 在 offset `554258381` 跳过 51 bytes 后重同步，受影响 symbol 为
+  `1256`；其最后发布 sequence 为 `2596502`，早于损坏 frame `2596517`。
+- 三天均由 runner 记为 `success_with_issues / published_partial`。全文件扫描确认
+  depth 每行 23 列、`total_value` 非负且按 symbol 不回退；basic-info 每行 30 列、
+  主键无重复且 multiplier 全部大于 0。
 
 ## 实施步骤
 
@@ -90,6 +101,14 @@
 - 用真实 CSV 抽查 `total_value` 单调非负、TWSE 量纲、TAIFEX multiplier、列数、日期、
   symbol 和问题摘要。
 - 后台启动后检查 PID/service、首个交易日日志、输出 `.partial` 与最终发布行为。
+
+2026-08-01 TWSE best-effort 实现完成后的验证结果：
+
+- Release 与 Debug 各运行完整 CTest，均为 70/70 通过。
+- 新行为已有失败测试到通过的证据，覆盖 cycle mismatch、checksum/truncated tail、
+  有界重同步、受影响 symbol 隔离、缺失/零 multiplier 和双文件发布。
+- `rebuild_twse_csv` 通过 `bash -n`、CLI help 和三天真实发布 smoke；三天 summary
+  均为 `success_with_issues / published_partial`，没有单文件替换。
 
 ## 回滚
 

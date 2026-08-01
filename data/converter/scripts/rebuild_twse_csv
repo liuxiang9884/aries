@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+
+set -u
+set -o pipefail
+
+archive_dir=/data/tw/raw/stock
+raw_dir=/tw_backup/data/tw/raw/stock
+csv_dir=/tw_backup/data/tw/csv/stock
+converter=
+dates_file=
+run_dir=
+non_trading_days_file=
+
+usage() {
+  printf '%s\n' \
+    'Usage: rebuild_twse_csv --converter PATH --dates-file PATH --run-dir PATH' \
+    '  [--archive-dir PATH] [--raw-dir PATH] [--csv-dir PATH]' \
+    '  [--non-trading-days-file PATH]'
+}
+
+require_value() {
+  if [[ $# -lt 2 || -z "$2" ]]; then
+    printf 'missing value for %s\n' "$1" >&2
+    exit 2
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --archive-dir)
+    require_value "$@"
+    archive_dir=$2
+    shift 2
+    ;;
+  --raw-dir)
+    require_value "$@"
+    raw_dir=$2
+    shift 2
+    ;;
+  --csv-dir)
+    require_value "$@"
+    csv_dir=$2
+    shift 2
+    ;;
+  --converter)
+    require_value "$@"
+    converter=$2
+    shift 2
+    ;;
+  --dates-file)
+    require_value "$@"
+    dates_file=$2
+    shift 2
+    ;;
+  --run-dir)
+    require_value "$@"
+    run_dir=$2
+    shift 2
+    ;;
+  --non-trading-days-file)
+    require_value "$@"
+    non_trading_days_file=$2
+    shift 2
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    printf 'unknown argument: %s\n' "$1" >&2
+    usage >&2
+    exit 2
+    ;;
+  esac
+done
+
+if [[ -z "$converter" || -z "$dates_file" || -z "$run_dir" ]]; then
+  usage >&2
+  exit 2
+fi
+if [[ ! -x "$converter" ]]; then
+  printf 'converter is not executable: %s\n' "$converter" >&2
+  exit 2
+fi
+if [[ ! -f "$dates_file" ]]; then
+  printf 'dates file does not exist: %s\n' "$dates_file" >&2
+  exit 2
+fi
+if [[ -n "$non_trading_days_file" && ! -f "$non_trading_days_file" ]]; then
+  printf 'non-trading-days file does not exist: %s\n' \
+    "$non_trading_days_file" >&2
+  exit 2
+fi
+
+mkdir -p "$raw_dir" "$csv_dir" "$run_dir"
+summary="$run_dir/summary.tsv"
+printf 'date\tresult\tpublication\tinput_source\tconverter_exit\tdepth_bytes\tbasic_bytes\tlog\n' \
+  >"$summary"
+
+path_identity() {
+  local path=$1
+  if [[ -f "$path" ]]; then
+    stat -c '%d:%i' "$path"
+  else
+    printf 'missing\n'
+  fi
+}
+
+existing_publication() {
+  local depth=$1
+  local basic=$2
+  if [[ -s "$depth" && -s "$basic" ]]; then
+    printf 'preserved_previous\n'
+  else
+    printf 'not_published\n'
+  fi
+}
+
+is_non_trading_day() {
+  local date=$1
+  [[ -n "$non_trading_days_file" ]] || return 1
+  awk -v date="$date" '$0 == date { found = 1 } END { exit !found }' \
+    "$non_trading_days_file"
+}
+
+cleanup_extract_dir() {
+  local date=$1
+  local extract_dir=$2
+  case "$extract_dir" in
+  "$raw_dir"/.extract."$date".*)
+    rm -rf -- "$extract_dir"
+    ;;
+  *)
+    printf 'refusing to remove unexpected extraction path: %s\n' \
+      "$extract_dir" >&2
+    return 1
+    ;;
+  esac
+}
+
+process_day() {
+  local date=$1
+  local dump="$raw_dir/twse_stock_${date}.dump"
+  local archive="$archive_dir/twse_stock_${date}.dump.tar.gz"
+  local depth="$csv_dir/twse_stock_${date}.csv"
+  local basic="$csv_dir/twse_basic_info_${date}.csv"
+  local extract_dir=
+  local extracted=
+  local before_depth
+  local before_basic
+  local after_depth
+  local after_basic
+  local converter_status
+  local publication_status_valid=false
+
+  day_result=
+  day_publication=
+  day_input_source=
+  day_converter_exit=-1
+  printf 'date=%s start=%s\n' "$date" "$(date --iso-8601=seconds)"
+
+  if [[ -s "$dump" ]]; then
+    day_input_source=existing_raw
+    printf 'raw_source=existing path=%s bytes=%s\n' \
+      "$dump" "$(stat -c %s "$dump")"
+  elif [[ -f "$dump" ]]; then
+    day_input_source=empty_raw
+    day_publication=$(existing_publication "$depth" "$basic")
+    if is_non_trading_day "$date"; then
+      day_result=non_trading_day
+    else
+      day_result=empty_input
+    fi
+    printf 'error=%s dump=%s\n' "$day_result" "$dump"
+    return
+  else
+    day_input_source=archive
+    if [[ ! -f "$archive" ]]; then
+      day_result=missing_input
+      day_publication=$(existing_publication "$depth" "$basic")
+      printf 'error=missing_input dump=%s archive=%s\n' "$dump" "$archive"
+      return
+    fi
+    if ! gzip -t -- "$archive"; then
+      day_result=input_corrupt
+      day_publication=$(existing_publication "$depth" "$basic")
+      printf 'error=archive_integrity_failed archive=%s\n' "$archive"
+      return
+    fi
+
+    extract_dir=$(mktemp -d "$raw_dir/.extract.${date}.XXXXXX")
+    printf 'raw_source=archive archive=%s extract_dir=%s\n' \
+      "$archive" "$extract_dir"
+    if ! nice -n 10 ionice -c2 -n7 tar -xzf "$archive" \
+      -C "$extract_dir" -- "twse_stock_${date}.dump"; then
+      cleanup_extract_dir "$date" "$extract_dir"
+      day_result=input_corrupt
+      day_publication=$(existing_publication "$depth" "$basic")
+      printf 'error=archive_extraction_failed archive=%s\n' "$archive"
+      return
+    fi
+    extracted="$extract_dir/twse_stock_${date}.dump"
+    if [[ ! -s "$extracted" ]]; then
+      cleanup_extract_dir "$date" "$extract_dir"
+      day_publication=$(existing_publication "$depth" "$basic")
+      if is_non_trading_day "$date"; then
+        day_result=non_trading_day
+      else
+        day_result=empty_input
+      fi
+      printf 'error=%s archive=%s\n' "$day_result" "$archive"
+      return
+    fi
+    mv -- "$extracted" "$dump"
+    rmdir -- "$extract_dir"
+    printf 'raw_published=%s bytes=%s\n' "$dump" "$(stat -c %s "$dump")"
+  fi
+
+  before_depth=$(path_identity "$depth")
+  before_basic=$(path_identity "$basic")
+  if nice -n 10 ionice -c2 -n7 "$converter" \
+    --dump "$dump" \
+    --trading-day "$date" \
+    --symbol-filter-mode stock \
+    --output "$depth" \
+    --basic-output "$basic" \
+    --overwrite; then
+    day_converter_exit=0
+  else
+    day_converter_exit=$?
+  fi
+  after_depth=$(path_identity "$depth")
+  after_basic=$(path_identity "$basic")
+
+  if [[ "$after_depth" != missing && "$after_basic" != missing &&
+        "$after_depth" != "$before_depth" &&
+        "$after_basic" != "$before_basic" ]]; then
+    converter_status=$(sed -n 's/.*TWSE conversion complete: status=\([^ ]*\).*/\1/p' \
+      "$day_log" | tail -1)
+    case "$converter_status" in
+    published_complete)
+      day_publication=published_complete
+      publication_status_valid=true
+      ;;
+    published_partial)
+      day_publication=published_partial
+      publication_status_valid=true
+      ;;
+    *)
+      day_publication=published_partial
+      printf 'error=missing_or_invalid_converter_publication_status value=%s\n' \
+        "$converter_status"
+      ;;
+    esac
+  elif [[ "$after_depth" == "$before_depth" &&
+          "$after_basic" == "$before_basic" ]]; then
+    day_publication=$(existing_publication "$depth" "$basic")
+  else
+    day_publication=not_published
+    printf 'error=output_pair_changed_non_atomically depth_before=%s ' \
+      "$before_depth"
+    printf 'depth_after=%s basic_before=%s basic_after=%s\n' \
+      "$after_depth" "$before_basic" "$after_basic"
+  fi
+
+  if [[ $day_converter_exit -ne 0 ]]; then
+    day_result=conversion_failed
+  elif [[ "$publication_status_valid" != true ]]; then
+    day_result=runner_error
+  elif [[ "$day_publication" == published_complete ]]; then
+    day_result=success
+  elif [[ "$day_publication" == published_partial ]]; then
+    day_result=success_with_issues
+  else
+    day_result=runner_error
+  fi
+  printf 'date=%s finish=%s result=%s publication=%s\n' \
+    "$date" "$(date --iso-8601=seconds)" "$day_result" "$day_publication"
+}
+
+while IFS= read -r date || [[ -n "$date" ]]; do
+  [[ -n "$date" ]] || continue
+  if [[ ! "$date" =~ ^[0-9]{8}$ ]]; then
+    printf 'invalid trading day in dates file: %s\n' "$date" >&2
+    exit 2
+  fi
+  day_log="$run_dir/${date}.log"
+  process_day "$date" >"$day_log" 2>&1
+  depth="$csv_dir/twse_stock_${date}.csv"
+  basic="$csv_dir/twse_basic_info_${date}.csv"
+  depth_bytes=0
+  basic_bytes=0
+  [[ -f "$depth" ]] && depth_bytes=$(stat -c %s "$depth")
+  [[ -f "$basic" ]] && basic_bytes=$(stat -c %s "$basic")
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$date" "$day_result" "$day_publication" "$day_input_source" \
+    "$day_converter_exit" "$depth_bytes" "$basic_bytes" "$day_log" \
+    >>"$summary"
+done <"$dates_file"
+
+printf 'summary=%s finish=%s\n' "$summary" "$(date --iso-8601=seconds)"

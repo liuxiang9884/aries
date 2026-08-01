@@ -13,9 +13,12 @@
   22、23，以及五种 Orion-compatible filter mode。
 - converter 同时发布 Orion-compatible 23 列 depth CSV 与 30 列 format1
   basic-info CSV；后者按 `(trading_day, market, symbol)` 去重并排序。
-- 2026-07-07 `stock` depth 输出与 Orion legacy CSV bytes、行数和 SHA-256
-  一致；basic-info 输出 40,841 行，SHA-256 为
-  `093699608154545fafe40337ad7616c029b3c5ae7ef1277b84cdfd4d349f540a`。
+- depth schema 保持 Orion-compatible 23 列，但 `total_value` 已纳入 format1
+  `multiplier`，因此不再与 Orion legacy CSV byte-compatible。2026-07-07
+  basic-info 历史基线为 40,841 行。
+- TWSE converter 对 format1 cycle mismatch、局部 frame 损坏和 missing multiplier
+  采用可审计的 best-effort 策略；depth/basic-info 成对发布，状态区分
+  `published_complete` 与 `published_partial`。
 - `taifex_dump_converter` 已同步解析全部 TAIFEX futures outright 与 spread，
   输出 44 列 research depth CSV 和 27 列 basic-info CSV；不依赖 SHM。
 - 2026-07-07 真实 TAIFEX dump 已按当前 contract 完成 full dry-run；读取
@@ -26,6 +29,7 @@
 
 - 实现：`data/converter/twse/`
 - TAIFEX 实现：`data/converter/taifex/`
+- TWSE 批量 runner：`data/converter/scripts/rebuild_twse_csv`
 - 测试：`tests/data/converter/twse/`
 - TAIFEX 测试：`tests/data/converter/taifex/`
 - 协议与 Orion 差异：`data/converter/docs/twse.md`
@@ -42,6 +46,9 @@
 - legacy CSV 丢弃 bid / ask volume；正式 schema 必须另行设计和版本化。
 - 非 dry-run 必须提供 depth 与 basic-info 两个不同路径；运行时错误不发布半文件，
   `--overwrite` 下会恢复旧输出。进程崩溃或断电跨两次 rename 不具备文件系统事务保证。
+- TWSE frame recovery 最多向前扫描 1 MiB，只接受完整通过 frame 校验的重同步点；
+  可识别的受损 symbol 后续不再输出，避免错误延续累计 `total_value`。具体状态和日志
+  contract 以 `data/converter/docs/twse.md` 为准。
 - 所有有意偏离 Orion 的行为必须记录在对应 exchange 专题文档并有 focused test。
 - TAIFEX 的 `total_value = abs(price) * contracts * multiplier`，累计值非负。
 - TAIFEX metadata/gap/cache 问题不阻止其余合约发布，必须从每日日志审查 symbol、
@@ -60,8 +67,9 @@ git diff --check
 
 ## 当前主线
 
-TWSE / TPEx 和 TAIFEX converter 均已完成实现与 2026-07-07 真实 dump 回归；
-`/tw_backup` 的 stock/future 全量重建由后台任务逐日执行并保留解压 dump。
+TWSE / TPEx 和 TAIFEX converter 均已完成主体实现与真实 dump 回归；`/tw_backup`
+的 stock/future 全量重建由后台任务逐日执行并保留解压 dump。TWSE 旧 runner 的失败
+日期正使用 best-effort runner 重跑。
 
 ## 下一步
 
