@@ -54,8 +54,8 @@ VCPKG_ROOT=/home/liuxiang/vcpkg ctest --preset debug
 
 ## 下一步
 
-在批量生成其余 TAIFEX CSV 前，建立夜盘自然日映射与数据 manifest/version
-contract；converter 的当前日盘结果和边界由模块文档维护。
+建立数据 manifest/version contract，并继续讨论 TAIFEX 缺口数据的下游使用规则。
+TAIFEX 当前只处理确认过的日盘输入；夜盘支持暂缓。
 
 ## 按需阅读
 

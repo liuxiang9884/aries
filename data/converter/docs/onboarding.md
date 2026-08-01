@@ -44,7 +44,8 @@
 - 所有有意偏离 Orion 的行为必须记录在对应 exchange 专题文档并有 focused test。
 - TAIFEX 的 `total_value = signed price * contracts * multiplier`；spread 可为负。
   `continuous_flag=0` 的 history 不能用于要求完整累计 value 的研究。
-- 当前 TAIFEX timestamp 只完成日盘验证；夜盘自然日映射尚未建立交易日历 contract。
+- 当前 TAIFEX 正式 contract 仅支持日盘。夜盘暂不转换，且 CLI 不会自动拒绝夜盘；
+  调用方必须保证输入只含日盘。启用夜盘前必须建立交易日历映射并补真实数据回归。
 
 ## 验证命令
 
@@ -61,8 +62,8 @@ TWSE / TPEx 和 TAIFEX converter 均已完成实现与 2026-07-07 真实 dump �
 
 ## 下一步
 
-批量转换 `/data/tw/raw/future/` 的其余交易日之前，先决定夜盘 timestamp 的交易日历
-映射与 manifest/version contract；日盘文件可复用现有 CLI 和验证入口。
+继续转换 `/data/tw/raw/future/` 时只处理确认过的日盘输入；夜盘支持明确 deferred。
+下一步先确定 `continuous_flag=0` 数据的下游过滤与研究使用 contract。
 
 ## 按需阅读
 

@@ -280,7 +280,8 @@ TAIFEX 45/27 列 schema、multiplier/value 口径、恢复语义、Orion 差异�
 
 - 为 raw、dump、csv、后续 parquet / binary 研究数据确定统一目录约定，避免 `/data/tw/raw` 与 `/home/liuxiang/data/raw` 长期并存而语义不清。
 - 建立数据 manifest：数据类型、交易日、来源、远端路径、本地路径、大小、hash、生成命令、生成时间和质量检查状态。
-- 为 TAIFEX 夜盘建立交易日到事件自然日的交易日历映射，再批量转换其余交易日。
+- TAIFEX 当前只允许正式转换日盘。夜盘支持 deferred；未来启用前必须建立交易日到
+  事件自然日的交易日历映射，并补真实夜盘回归和 timestamp 一致性检查。
 - 为 TAIFEX/TWSE 输出建立 manifest 与明确 schema version，记录输入 hash、工具
   commit、输出 hash、质量统计和 `continuous_flag` 覆盖。
 - 为 TWSE 设计包含 bid / ask volume 的正式版本化 schema；在 contract、

@@ -72,4 +72,5 @@ depth CSV 与 27 列 basic-info CSV：
 
 只校验不输出时使用 `--dry-run`。默认拒绝覆盖，明确传入 `--overwrite` 才会在
 完整成功后替换已有的两份 CSV。schema、multiplier/value 口径、sequence recovery、
-已知边界和 Orion 差异见 `data/converter/docs/taifex.md`。
+已知边界和 Orion 差异见 `data/converter/docs/taifex.md`。当前正式 contract 仅支持
+日盘；夜盘暂不转换，也不得进入正式研究数据集。

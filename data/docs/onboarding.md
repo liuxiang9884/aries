@@ -39,8 +39,8 @@
 
 ## 下一步
 
-统一 raw、dump、CSV 与后续研究数据的目录和版本规则，建立第一版 manifest，并在
-批量 TAIFEX 转换前锁定夜盘 timestamp 映射。
+统一 raw、dump、CSV 与后续研究数据的目录和版本规则并建立第一版 manifest。
+TAIFEX 只处理确认过的日盘输入；夜盘支持暂缓。
 
 ## 按需阅读
 
