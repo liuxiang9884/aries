@@ -16,6 +16,7 @@ struct DepthRecord {
   double open{};
   double high_limit{};
   double low_limit{};
+  std::uint64_t multiplier{};
   std::int64_t total_volume{};
   double total_value{};
   std::int64_t total_trade{};

@@ -8,15 +8,15 @@
 
 namespace aries::data::twse {
 
-class LegacyCsvWriter {
+class DepthCsvWriter {
 public:
-  LegacyCsvWriter(const std::filesystem::path &output_path, bool overwrite);
-  ~LegacyCsvWriter();
+  DepthCsvWriter(const std::filesystem::path &output_path, bool overwrite);
+  ~DepthCsvWriter();
 
-  LegacyCsvWriter(const LegacyCsvWriter &) = delete;
-  LegacyCsvWriter &operator=(const LegacyCsvWriter &) = delete;
-  LegacyCsvWriter(LegacyCsvWriter &&) noexcept;
-  LegacyCsvWriter &operator=(LegacyCsvWriter &&) noexcept;
+  DepthCsvWriter(const DepthCsvWriter &) = delete;
+  DepthCsvWriter &operator=(const DepthCsvWriter &) = delete;
+  DepthCsvWriter(DepthCsvWriter &&) noexcept;
+  DepthCsvWriter &operator=(DepthCsvWriter &&) noexcept;
 
   void Write(const DepthRecord &record);
 
@@ -46,7 +46,7 @@ private:
 
 class CsvOutputTransaction {
 public:
-  static void Commit(LegacyCsvWriter &depth_writer,
+  static void Commit(DepthCsvWriter &depth_writer,
                      BasicInfoCsvWriter &basic_info_writer);
 };
 

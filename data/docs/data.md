@@ -1,14 +1,13 @@
 # 数据说明
 
-更新时间：2026-07-31T17:51:13+08:00
+更新时间：2026-08-01
 
 ## 当前范围
 
 当前已有工作集中在台湾 raw 行情下载、本地落盘、TWSE dump converter，
 以及 2026-07-07 dump 到 CSV 的兼容性验证。仓库尚未建立正式版本化 schema、
-manifest、分区格式或通用质量检查报告；当前 converter 生成 Orion-compatible
-depth CSV 和 format1 basic-info CSV，仍不能替代版本化的完整行情研究数据
-contract。
+manifest、分区格式或通用质量检查报告；当前 converter 生成 23 列 depth CSV 和
+format1 basic-info CSV，仍不能替代版本化的完整行情研究数据 contract。
 
 ## NAS Raw 下载
 
@@ -127,10 +126,11 @@ format1 另生成 30 列 basic-info CSV，主键和排序键为
 - `trading_day` 按 UTC+8 自然日零点计算，不依赖进程时区；消息中的 BCD
   `HHMMSSmmmuuu` 是当日偏移。
 - offline `symbol_id` 固定为 `-1`，`localtime` 等于 `exchtime`。
-- price 和 `total_value` 使用两位小数；五档 volume 参与内部状态更新，但
-  Orion legacy CSV 不包含对应列。
-- 每个 symbol 跨消息保存 high / low limit、open、last、累计 volume 和
-  Orion 当前增量口径的 `total_value`。
+- price 和 `total_value` 使用两位小数；五档 volume 参与内部状态更新，但当前
+  23 列 CSV 不包含对应列。
+- 每个 symbol 跨消息保存 high / low limit、open、last 和累计 volume。一般交易
+  的 `total_value` 累计 `delta_volume * last_price * multiplier`，单位为
+  basic-info `currency`；odd-lot 的有效乘数为 1。
 - 非法 service / format version / BCD / message length / checksum、截断、
   非法 trailer 或超过五档会终止转换。
 - 非 dry-run 必须指定不同的 `--output` 与 `--basic-output`。两份 CSV 都先写
@@ -198,8 +198,8 @@ cd /home/liuxiang/dev/orion
   `1783384200073709000` 至 `1783402380000000000`。
 - 两份文件发布后重新计算 SHA-256，结果见上表。
 
-Aries converter 使用相同 stock dump 和 `trading_day = 20260707` 做完整
-转换：
+以下是 2026-08-01 修改 `total_value` multiplier contract 前的历史兼容性验证。
+当时 Aries converter 使用相同 stock dump 和 `trading_day = 20260707` 做完整转换：
 
 ```bash
 ./build/release/data/converter/twse_dump_converter \
@@ -214,7 +214,8 @@ Aries converter 使用相同 stock dump 和 `trading_day = 20260707` 做完整
 depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正式输出均为
 2,742,684,274 bytes，SHA-256 均为
 `f5981991517c24d07fbe4ee2ef38d9b9d3d198b69d2c841cdab39d5a8cb3cc41`，
-`cmp` 返回 0。完整 dump 的其余四种 filter mode 也已通过 dry-run；该 dump
+`cmp` 返回 0。新 contract 不再以该 depth hash 或 `cmp` 为完成条件。完整 dump 的
+其余四种 filter mode 也已通过 dry-run；该 dump
 没有可供 `odd_lot` format23 / `warrant` format17 depth 输出的真实消息，
 因此这两种 depth 输出路径仍以 synthetic fixture 为验证证据。
 
@@ -238,4 +239,4 @@ depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正�
 - 提取 TAIFEX dump converter，并以相同方式建立小样本 fixture、失败边界和
   2026-07-07 完整文件兼容性证据。
 - 为 TWSE 设计包含 bid / ask volume 的正式版本化 schema；在 contract、
-  manifest 和迁移规则锁定前，不把 legacy CSV 当作正式研究数据集。
+  manifest 和迁移规则锁定前，不把当前 23 列 CSV 当作正式研究数据集。

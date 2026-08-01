@@ -22,8 +22,8 @@ ctest --test-dir build/debug \
   version、五种 filter mode 和 UTC+8 `trading_day`。
 - 非法 service / version / BCD / checksum / 日期、short body、超过五档、
   截断 dump 和结束控制 symbol。
-- legacy / basic-info CSV 内容、dry-run、默认拒绝覆盖、双文件旧版本保护、
-  partial symlink / 目录防护和发布回滚。
+- depth / basic-info CSV 内容、multiplier 与 odd-lot value 单位、dry-run、默认
+  拒绝覆盖、双文件旧版本保护、partial symlink / 目录防护和发布回滚。
 
 ## 完整 Dump Dry-run
 
@@ -43,7 +43,7 @@ basic_messages=1145472 basic_controls=167 basic_duplicates=1104631
 basic_rows=40841 bytes=3153093917 dry_run=true
 ```
 
-## Orion 兼容性比较
+## 历史 Orion 对照与当前验证
 
 完整转换结果写入 `/home/liuxiang/tmp`，同时指定两份输出：
 
@@ -56,7 +56,7 @@ basic_rows=40841 bytes=3153093917 dry_run=true
   --basic-output /home/liuxiang/tmp/<run>/twse_basic_info_20260707.csv
 ```
 
-再与 Orion depth 基准比较：
+2026-08-01 以前可与 Orion depth 基准比较：
 
 ```bash
 sha256sum \
@@ -68,12 +68,17 @@ cmp \
   /home/liuxiang/data/csv/stock/twse_stock_20260707.csv
 ```
 
-2026-07-07 验证基线：
+2026-07-07 修改前的历史验证基线：
 
 | 输出 | bytes | 数据行 | 列数 | SHA-256 |
 |---|---:|---:|---:|---|
 | depth | 2,742,684,274 | 15,886,026 | 23 | `f5981991517c24d07fbe4ee2ef38d9b9d3d198b69d2c841cdab39d5a8cb3cc41` |
 | basic-info | 5,118,361 | 40,841 | 30 | `093699608154545fafe40337ad7616c029b3c5ae7ef1277b84cdfd4d349f540a` |
+
+当前 depth `total_value` 已纳入 format1 `multiplier`，不得再要求 depth hash 或
+`cmp` 与 Orion 相同。完整验证应保持数据行数和 23 列 schema，并抽查一般交易满足
+`new_total_value - old_total_value = delta_volume * last_price * multiplier`；
+odd-lot 使用有效乘数 1。
 
 basic-info 还应检查：header 与每行均为 30 列；主键严格递增且唯一；TWSE 的
 `stock_group_code` 为空、TPEx 的 `foreign_stock_flag` 为空；非权证的权证专属

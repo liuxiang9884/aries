@@ -307,6 +307,10 @@ void MessageDecoder::ApplyBasicInfo(const BasicInfoRecord &basic_info) {
   record->previous_close = basic_info.reference_price;
   record->high_limit = basic_info.high_limit;
   record->low_limit = basic_info.low_limit;
+  if (basic_info.multiplier == 0) {
+    throw std::runtime_error("TWSE basic-info multiplier must be positive");
+  }
+  record->multiplier = basic_info.multiplier;
 }
 
 void MessageDecoder::ProcessOddLotBasicInfo(
@@ -392,9 +396,16 @@ MessageDecoder::ProcessDepth(const MessageHeader &header,
                                            : protocol::kStockTotalVolumeOffset;
   const auto total_volume = static_cast<std::int64_t>(
       DecodeBcdInteger(body.subspan(total_volume_offset, volume_size)));
+  if (!odd_lot && total_volume != record->total_volume &&
+      record->multiplier == 0) {
+    throw std::runtime_error(
+        "stock volume changed before multiplier metadata arrived");
+  }
+  const auto effective_multiplier =
+      odd_lot ? std::uint64_t{1} : record->multiplier;
   record->total_value +=
       static_cast<double>(total_volume - record->total_volume) *
-      record->last_price;
+      record->last_price * static_cast<double>(effective_multiplier);
   record->total_volume = total_volume;
 
   if (record->open == 0.0 && record->total_volume != 0) {

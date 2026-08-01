@@ -1,6 +1,6 @@
 # TWSE / TPEx Dump Converter 设计与 Orion 差异
 
-更新时间：2026-07-31
+更新时间：2026-08-01
 
 ## 事实源与范围
 
@@ -10,7 +10,7 @@
   上市股票，业务别 `01`。
 - `data/docs/exchange/上櫃股票IP行情網路規格書(V.12.16 TCPIP).pdf`：上柜股票，
   业务别 `02`。
-- `/home/liuxiang/dev/orion` 的 `4282286`：legacy CSV 行为基准。
+- `/home/liuxiang/dev/orion` 的 `4282286`：既有行为与历史 CSV 对照。
 
 `twse_dump_converter` 同时处理 TWSE listed 和 TPEx / OTC 消息。它是 offline
 dump 到 CSV 的独立工具，不提取 Orion 的 multicast、replay、SHM、symbol
@@ -78,7 +78,7 @@ header 的 `service_type` 区分。format 1 的上柜一般股票资料比上市
 | `warrant_lower_price` | optional `double` | 固定 4 位小数 | 权证；其他为空 |
 | `maturity_date` | optional `int32` | `YYYY-MM-DD` | 权证；其他为空 |
 | `foreign_stock_flag` | optional string | 原始 flag | 仅 TWSE；TPEx 为空 |
-| `multiplier` | `uint64` | format1 数值原值 | 全部；与 TAIFEX 的统一语义待后续决定 |
+| `multiplier` | `uint64` | 每一标准交易单位包含的证券数量 | 全部；format 6 / 17 的成交额计算使用该值 |
 | `currency` | string | ISO-like 3-char code；wire 空白规范化为 `TWD` | 全部 |
 | `market_data_line` | `uint64` | BCD `1` / `2` | 全部 |
 
@@ -119,10 +119,9 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
 - warrant symbol 除 Orion 代码形态外，也可由先到达的 format1 权证元数据识别。
 - `all` mode 对所有 symbol 的 format 6 写 CSV，但不会写 format 17；这是
   Orion 当前 mode 语义，不把 `all` 解释为所有 format。
-- 每个 symbol 维护 previous close、涨跌停、open、last、累计 volume 和
-  Orion 增量估算口径的 `total_value`。
-- legacy CSV 仍为 23 列，不包含 bid / ask volume；price 和
-  `total_value` 保留两位小数。
+- 每个 symbol 维护 previous close、涨跌停、open、last 和累计 volume。
+- depth CSV 为 23 列，不包含 bid / ask volume；price 和 `total_value` 保留
+  两位小数。
 - offline `symbol_id = -1`，`localtime = exchtime`。
 
 ## 有意不同于 Orion 的行为
@@ -143,11 +142,17 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
 | format1 输出 | 只更新 depth 内部状态 | 另生成 30 列、去重且排序的 basic-info CSV | 保留可研究的证券与权证基础资料 |
 | format1 控制 | `AL` / `NE` 可能成为 pseudo symbol | 识别控制记录，并在首轮同步后校验每个完整周期数量 | 防止计数记录污染证券状态并检测丢包 |
 | format1 重复 | 同 symbol 后到状态覆盖 | 相同记录去重；字段变化即失败并报告 diff | format1 无安全的 last-wins 时间语义 |
+| `total_value` | `delta_volume * last_price`，未乘交易单位 | 一般交易累计 `delta_volume * last_price * multiplier`；odd-lot 的 wire volume 已是实际证券数量，有效乘数为 1 | 统一为实际币种成交额；depth CSV 不再与 Orion byte-compatible |
 | CLI 日志 | 工具原有输出方式 | outer CLI 使用 Nova `INFO` / `ERROR`；core 通过异常传递 | 错误只记录一次且保持统一日志设施 |
 
-上述差异不改变有效 2026-07-07 `stock` 数据的 legacy CSV：完整 Aries 输出
-与 Orion 输出 bytes、行数及 SHA-256 相同，`cmp` 返回 0。严格校验主要改变
-损坏数据、未知协议版本、错误配置和结束控制消息的处理方式。
+2026-07-07 的旧验证曾证明修改前 depth CSV 与 Orion bytes 完全一致；该 hash 只
+作为历史基线。自 2026-08-01 起 `total_value` 纳入 format1 `multiplier`，因此新
+depth CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不变。
+
+`total_value` 不是交易所直接提供的字段。一般交易按相邻消息累计量差、当前成交价
+和 format1 multiplier 计算，币种来自 basic-info `currency`；若成交量变化前尚未
+收到 multiplier metadata，转换失败而不是默认乘数。format 23 odd-lot 的 volume
+已经是实际证券数量，因此不再乘标准交易单位。
 
 ## 当前验证边界
 
@@ -164,8 +169,8 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
   其中 TWSE 30,488 行、TPEx 10,353 行。
 - 该 dump 没有可供 `odd_lot` format23 / `warrant` format17 depth 输出的真实
   消息；这两个 depth 输出路径目前仍由 synthetic fixture 覆盖。
-- legacy CSV 丢弃五档 volume。包含 volume 的正式研究 schema 需要单独设计、
-  版本化和迁移，不能直接修改本兼容输出。
+- 当前 depth CSV 丢弃五档 volume。包含 volume 的正式研究 schema 需要单独设计、
+  版本化和迁移，不能直接修改现有 23 列输出。
 
 ## 输出实现边界
 

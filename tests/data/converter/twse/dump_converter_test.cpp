@@ -64,7 +64,7 @@ protected:
   std::filesystem::path basic_output_path_;
 };
 
-TEST_F(DumpConverterTest, ConvertsDumpToLegacyCsvAndPublishesAtomically) {
+TEST_F(DumpConverterTest, ConvertsDumpToDepthCsvAndPublishesAtomically) {
   const auto dump = MakeStockDump();
   test::WriteBinaryFile(dump_path_, dump);
 
@@ -88,7 +88,7 @@ TEST_F(DumpConverterTest, ConvertsDumpToLegacyCsvAndPublishesAtomically) {
       "total_volume,total_value,status,sequence\n"
       "2330,-1,1783386000123456000,1783386000123456000,99.00,81.00,95.00,"
       "95.10,94.90,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,95.00,10,"
-      "100,9500.00,524434,123\n";
+      "100,9500000.00,524434,123\n";
   EXPECT_EQ(csv, expected);
 
   std::ifstream basic_input(basic_output_path_, std::ios::binary);

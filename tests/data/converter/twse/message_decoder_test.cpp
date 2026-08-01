@@ -43,7 +43,7 @@ TEST(MessageDecoderTest, AppliesBasicInfoAndDecodesStockDepthState) {
   EXPECT_DOUBLE_EQ(record->open, 95.0);
   EXPECT_EQ(record->total_trade, 10);
   EXPECT_EQ(record->total_volume, 100);
-  EXPECT_DOUBLE_EQ(record->total_value, 9500.0);
+  EXPECT_DOUBLE_EQ(record->total_value, 9'500'000.0);
   EXPECT_DOUBLE_EQ(record->bid_price[0], 94.9);
   EXPECT_EQ(record->bid_volume[0], 20);
   EXPECT_DOUBLE_EQ(record->ask_price[0], 95.1);
@@ -132,7 +132,30 @@ TEST(MessageDecoderTest, SupportsOddLotAndWarrantOutputModes) {
   EXPECT_EQ(odd_record->total_volume, 1'234'567'890);
   EXPECT_EQ(odd_record->ask_volume[0], 1'234'567'890);
 
+  constexpr std::array<Level, 1> kOddTrade{{
+      {.price = 952000, .volume = 2},
+  }};
+  const auto odd_trade = test::MakeOddLotDepth(
+      "2330", 90000001000, 1'234'567'892, true, 0, 0, kOddTrade);
+  odd_record = odd_lot_decoder.Process(
+      test::MakeHeader(MessageType::kStockOddLotDepthV, odd_trade.size(), 10),
+      odd_trade);
+  ASSERT_NE(odd_record, nullptr);
+  EXPECT_DOUBLE_EQ(odd_record->total_value, 190.4);
+
   MessageDecoder warrant_decoder(20260707, SymbolFilterMode::kWarrant);
+  const auto warrant_basic = test::MakeBasicInfo(test::BasicInfoFields{
+      .symbol = "12345P",
+      .security_type = "W2",
+      .warrant_flag = 'Y',
+      .maturity_date = 20261231,
+      .market_data_line = 2,
+  });
+  EXPECT_EQ(warrant_decoder.Process(
+                test::MakeHeader(MessageType::kStockBasicInfo,
+                                 warrant_basic.size()),
+                warrant_basic),
+            nullptr);
   constexpr std::array<Level, 1> kWarrantLevels{{
       {.price = 12300, .volume = 7},
   }};
@@ -148,6 +171,7 @@ TEST(MessageDecoderTest, SupportsOddLotAndWarrantOutputModes) {
   ASSERT_NE(warrant_record, nullptr);
   EXPECT_EQ(warrant_record->symbol, "12345P");
   EXPECT_EQ(warrant_record->sequence, 11);
+  EXPECT_NEAR(warrant_record->total_value, 8'610.0, 1e-9);
 }
 
 TEST(MessageDecoderTest, UsesFormat1MetadataForNonstandardWarrantSymbol) {
@@ -178,6 +202,21 @@ TEST(MessageDecoderTest, UsesFormat1MetadataForNonstandardWarrantSymbol) {
   ASSERT_NE(record, nullptr);
   EXPECT_EQ(record->symbol, "1234P");
   EXPECT_EQ(record->sequence, 12);
+  EXPECT_NEAR(record->total_value, 8'610.0, 1e-9);
+}
+
+TEST(MessageDecoderTest, RejectsVolumeBeforeMultiplierMetadata) {
+  MessageDecoder decoder(20260707, SymbolFilterMode::kStock);
+  constexpr std::array<Level, 1> kTrade{{
+      {.price = 950000, .volume = 1},
+  }};
+  const auto depth =
+      test::MakeDepth("2330", 90000000000, 1, true, 0, 0, kTrade);
+
+  EXPECT_THROW((void)decoder.Process(
+                   test::MakeHeader(MessageType::kStockDepthV, depth.size()),
+                   depth),
+               std::runtime_error);
 }
 
 TEST(MessageDecoderTest, PreservesOrionSymbolFilterSemantics) {

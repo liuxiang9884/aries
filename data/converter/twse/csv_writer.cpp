@@ -19,7 +19,7 @@
 namespace aries::data::twse {
 namespace {
 
-constexpr std::string_view kLegacyHeader =
+constexpr std::string_view kDepthHeader =
     "symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,"
     "ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,"
     "ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,"
@@ -193,9 +193,9 @@ void Rename(const std::filesystem::path &from, const std::filesystem::path &to,
 
 } // namespace
 
-struct LegacyCsvWriter::Impl {
+struct DepthCsvWriter::Impl {
   Impl(const std::filesystem::path &output_path, bool overwrite)
-      : file(output_path, overwrite, kLegacyHeader) {}
+      : file(output_path, overwrite, kDepthHeader) {}
 
   void Write(const DepthRecord &record) {
     row_buffer.clear();
@@ -252,16 +252,15 @@ struct BasicInfoCsvWriter::Impl {
   fmt::memory_buffer row_buffer;
 };
 
-LegacyCsvWriter::LegacyCsvWriter(const std::filesystem::path &output_path,
-                                 bool overwrite)
+DepthCsvWriter::DepthCsvWriter(const std::filesystem::path &output_path,
+                               bool overwrite)
     : impl_(std::make_unique<Impl>(output_path, overwrite)) {}
 
-LegacyCsvWriter::~LegacyCsvWriter() = default;
-LegacyCsvWriter::LegacyCsvWriter(LegacyCsvWriter &&) noexcept = default;
-LegacyCsvWriter &
-LegacyCsvWriter::operator=(LegacyCsvWriter &&) noexcept = default;
+DepthCsvWriter::~DepthCsvWriter() = default;
+DepthCsvWriter::DepthCsvWriter(DepthCsvWriter &&) noexcept = default;
+DepthCsvWriter &DepthCsvWriter::operator=(DepthCsvWriter &&) noexcept = default;
 
-void LegacyCsvWriter::Write(const DepthRecord &record) { impl_->Write(record); }
+void DepthCsvWriter::Write(const DepthRecord &record) { impl_->Write(record); }
 
 BasicInfoCsvWriter::BasicInfoCsvWriter(const std::filesystem::path &output_path,
                                        bool overwrite)
@@ -277,7 +276,7 @@ void BasicInfoCsvWriter::Write(const BasicInfoRecord &record) {
   impl_->Write(record);
 }
 
-void CsvOutputTransaction::Commit(LegacyCsvWriter &depth_writer,
+void CsvOutputTransaction::Commit(DepthCsvWriter &depth_writer,
                                   BasicInfoCsvWriter &basic_info_writer) {
   std::array<PublishState, 2> states{{
       {.file = &depth_writer.impl_->file,

@@ -69,11 +69,11 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
 
   MessageDecoder decoder(options.trading_day, options.symbol_filter_mode);
   BasicInfoCatalog basic_info_catalog(options.trading_day);
-  std::unique_ptr<LegacyCsvWriter> depth_writer;
+  std::unique_ptr<DepthCsvWriter> depth_writer;
   std::unique_ptr<BasicInfoCsvWriter> basic_info_writer;
   if (!options.dry_run) {
-    depth_writer = std::make_unique<LegacyCsvWriter>(options.output_path,
-                                                     options.overwrite);
+    depth_writer = std::make_unique<DepthCsvWriter>(options.output_path,
+                                                    options.overwrite);
     basic_info_writer = std::make_unique<BasicInfoCsvWriter>(
         options.basic_output_path, options.overwrite);
   }
