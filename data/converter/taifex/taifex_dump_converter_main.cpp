@@ -60,15 +60,35 @@ int main(int argc, char **argv) {
          .overwrite = overwrite});
     NOVA_INFO(
         "TAIFEX conversion complete: messages={} depth_rows={} symbols={} "
-        "i010={} i011={} basic_duplicates={} basic_rows={} ignored={} "
-        "metadata_missing={} sequence_gaps={} stale={} recoveries={} resets={} "
-        "bytes={} dry_run={}",
+        "i010={} i011={} i012={} basic_duplicates={} i012_duplicates={} "
+        "i012_conflicts={} basic_rows={} ignored={} metadata_missing={} "
+        "sequence_gaps={} unresolved_gaps={} stale={} recoveries={} "
+        "cache_overflows={} resets={} bytes={} dry_run={}",
         stats.messages_read, stats.rows_written, stats.symbols_seen,
         stats.product_basic_messages, stats.contract_basic_messages,
-        stats.basic_duplicates, stats.basic_info_rows, stats.ignored_messages,
+        stats.price_limit_messages, stats.basic_duplicates,
+        stats.price_limit_duplicates, stats.price_limit_conflicts,
+        stats.basic_info_rows, stats.ignored_messages,
         stats.metadata_missing_messages, stats.sequence_gaps,
-        stats.stale_messages, stats.snapshot_recoveries, stats.reset_messages,
-        stats.bytes_read, dry_run);
+        stats.unresolved_sequence_gaps, stats.stale_messages,
+        stats.snapshot_recoveries, stats.gap_cache_overflows,
+        stats.reset_messages, stats.bytes_read, dry_run);
+    for (const auto &count : stats.ignored_message_counts) {
+      NOVA_INFO(
+          "TAIFEX ignored message summary: trading_day={} transmission={} "
+          "kind={} count={}",
+          trading_day, count.transmission_code, count.message_kind,
+          count.count);
+    }
+    for (const auto &issue : stats.issues) {
+      NOVA_WARNING(
+          "TAIFEX conversion issue: trading_day={} type={} symbol={} "
+          "transmission={} kind={} expected_sequence={} actual_sequence={} "
+          "recovered={} recovery_sequence={}",
+          trading_day, aries::data::taifex::ToString(issue.kind), issue.symbol,
+          issue.transmission_code, issue.message_kind, issue.expected_sequence,
+          issue.actual_sequence, issue.recovered, issue.recovery_sequence);
+    }
     return 0;
   } catch (const std::exception &error) {
     NOVA_ERROR("TAIFEX conversion failed: {}", error.what());

@@ -2,6 +2,9 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <vector>
+
+#include "data/converter/taifex/message_decoder.h"
 
 namespace aries::data::taifex {
 
@@ -22,13 +25,20 @@ struct ConvertStats {
   std::uint64_t product_basic_messages{};
   std::uint64_t contract_basic_messages{};
   std::uint64_t basic_duplicates{};
+  std::uint64_t price_limit_messages{};
+  std::uint64_t price_limit_duplicates{};
+  std::uint64_t price_limit_conflicts{};
   std::uint64_t basic_info_rows{};
   std::uint64_t ignored_messages{};
   std::uint64_t metadata_missing_messages{};
   std::uint64_t sequence_gaps{};
   std::uint64_t stale_messages{};
   std::uint64_t snapshot_recoveries{};
+  std::uint64_t unresolved_sequence_gaps{};
+  std::uint64_t gap_cache_overflows{};
   std::uint64_t reset_messages{};
+  std::vector<ConversionIssue> issues;
+  std::vector<IgnoredMessageCount> ignored_message_counts;
 };
 
 [[nodiscard]] ConvertStats ConvertDump(const ConvertOptions &options);

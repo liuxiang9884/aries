@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -63,6 +64,26 @@ struct ContractInfo {
   bool operator==(const ContractInfo &) const = default;
 };
 
+struct PriceLimitLevel {
+  std::uint8_t level{};
+  std::uint64_t price_raw{};
+
+  bool operator==(const PriceLimitLevel &) const = default;
+};
+
+struct PriceLimitInfo {
+  std::string symbol;
+  std::vector<PriceLimitLevel> raise_limits;
+  std::vector<PriceLimitLevel> fall_limits;
+
+  bool operator==(const PriceLimitInfo &) const = default;
+};
+
+struct PriceLimitState {
+  PriceLimitInfo info;
+  std::uint64_t channel_sequence{};
+};
+
 struct BookLevel {
   char type{};
   double price{};
@@ -76,6 +97,7 @@ struct IncrementalLevel : BookLevel {
 
 struct EventMeta {
   std::string symbol;
+  char message_kind{};
   std::uint64_t sequence{};
   std::int64_t exchtime{};
 };
@@ -269,9 +291,10 @@ class OrderBookBuilder {
 public:
   OrderBookBuilder(std::int32_t trading_day, std::string symbol,
                    std::uint8_t decimal_locator, double multiplier,
-                   double reference_price, DecoderStats &stats)
+                   double reference_price, DecoderStats &stats,
+                   std::vector<ConversionIssue> &issues)
       : decimal_locator_(decimal_locator), multiplier_(multiplier),
-        stats_(stats) {
+        stats_(stats), issues_(issues) {
     record_.trading_day = trading_day;
     record_.symbol = std::move(symbol);
     record_.reference_price = reference_price;
@@ -279,10 +302,6 @@ public:
 
   [[nodiscard]] std::uint8_t decimal_locator() const noexcept {
     return decimal_locator_;
-  }
-
-  [[nodiscard]] bool waiting_for_snapshot() const noexcept {
-    return waiting_for_snapshot_;
   }
 
   [[nodiscard]] std::uint64_t sequence() const noexcept {
@@ -303,7 +322,8 @@ public:
     record_.reference_price = reference_price;
     cached_.clear();
     waiting_for_snapshot_ = false;
-    history_complete_ = true;
+    active_gap_issue_.reset();
+    disabled_ = false;
     has_open_ = false;
     last_trade_sequence_ = 0;
     last_actual_trade_sequence_ = 0;
@@ -311,24 +331,28 @@ public:
   }
 
   void Process(SequencedEvent event, const DepthCallback &emit) {
+    if (disabled_) {
+      return;
+    }
     const auto sequence = Meta(event).sequence;
+    const auto message_kind = Meta(event).message_kind;
     if (sequence <= record_.sequence && record_.sequence != 0) {
       ++stats_.stale_messages;
       return;
     }
     if (!waiting_for_snapshot_ && sequence == record_.sequence + 1) {
-      Apply(event, true, emit);
+      Apply(event, emit);
       return;
     }
     if (std::holds_alternative<FullBookEvent>(event)) {
       if (!waiting_for_snapshot_) {
-        ++stats_.sequence_gaps;
+        StartGap(Meta(event));
       }
-      history_complete_ = false;
       waiting_for_snapshot_ = true;
       const auto full_book = std::get<FullBookEvent>(std::move(event));
-      Apply(full_book, false, emit);
+      Apply(full_book, emit);
       EraseCachedThrough(full_book.meta.sequence);
+      MarkGapRecovered(full_book.meta.sequence);
       ReplayCached(emit);
       ++stats_.snapshot_recoveries;
       return;
@@ -336,8 +360,7 @@ public:
 
     if (!waiting_for_snapshot_) {
       waiting_for_snapshot_ = true;
-      history_complete_ = false;
-      ++stats_.sequence_gaps;
+      StartGap(Meta(event));
     }
     const auto inserted =
         cached_.try_emplace(sequence, std::move(event)).second;
@@ -345,15 +368,25 @@ public:
       ++stats_.stale_messages;
     }
     if (cached_.size() > protocol::kMaximumCachedEventsPerSymbol) {
-      throw std::runtime_error(fmt::format(
-          "TAIFEX gap cache exceeds limit for symbol {}", record_.symbol));
+      issues_.push_back({.kind = IssueKind::kGapCacheOverflow,
+                         .symbol = record_.symbol,
+                         .transmission_code = '2',
+                         .message_kind = message_kind,
+                         .expected_sequence = record_.sequence + 1,
+                         .actual_sequence = sequence});
+      ++stats_.gap_cache_overflows;
+      cached_.clear();
+      waiting_for_snapshot_ = false;
+      active_gap_issue_.reset();
+      disabled_ = true;
     }
   }
 
   [[nodiscard]] bool Recover(std::uint64_t last_sequence, std::int64_t exchtime,
                              const std::vector<BookLevel> &levels,
                              const DepthCallback &emit) {
-    if (!waiting_for_snapshot_ || last_sequence <= record_.sequence) {
+    if (disabled_ || !waiting_for_snapshot_ ||
+        last_sequence <= record_.sequence) {
       return false;
     }
     ClearBook();
@@ -364,6 +397,7 @@ public:
     record_.localtime = exchtime;
     record_.sequence = last_sequence;
     EraseCachedThrough(last_sequence);
+    MarkGapRecovered(last_sequence);
     ReplayCached(emit);
     ++stats_.snapshot_recoveries;
     return true;
@@ -409,18 +443,40 @@ public:
   }
 
 private:
+  void StartGap(const EventMeta &meta) {
+    issues_.push_back({.kind = IssueKind::kSequenceGap,
+                       .symbol = record_.symbol,
+                       .transmission_code = '2',
+                       .message_kind = meta.message_kind,
+                       .expected_sequence = record_.sequence + 1,
+                       .actual_sequence = meta.sequence});
+    active_gap_issue_ = issues_.size() - 1;
+    ++stats_.sequence_gaps;
+  }
+
+  void MarkGapRecovered(std::uint64_t recovery_sequence) {
+    if (!active_gap_issue_.has_value()) {
+      return;
+    }
+    auto &issue = issues_.at(*active_gap_issue_);
+    issue.recovered = true;
+    issue.recovery_sequence = recovery_sequence;
+    active_gap_issue_.reset();
+  }
+
   void ReplayCached(const DepthCallback &emit) {
+    waiting_for_snapshot_ = false;
     while (!cached_.empty()) {
       auto iterator = cached_.begin();
       if (iterator->first != record_.sequence + 1) {
         waiting_for_snapshot_ = true;
+        StartGap(Meta(iterator->second));
         return;
       }
       auto event = std::move(iterator->second);
       cached_.erase(iterator);
-      Apply(event, false, emit);
+      Apply(event, emit);
     }
-    waiting_for_snapshot_ = false;
   }
 
   void EraseCachedThrough(std::uint64_t sequence) {
@@ -430,13 +486,11 @@ private:
     }
   }
 
-  void Apply(const SequencedEvent &event, bool continuous,
-             const DepthCallback &emit) {
-    std::visit([&](const auto &value) { ApplyValue(value, continuous, emit); },
-               event);
+  void Apply(const SequencedEvent &event, const DepthCallback &emit) {
+    std::visit([&](const auto &value) { ApplyValue(value, emit); }, event);
   }
 
-  void ApplyValue(const TradeEvent &event, bool, const DepthCallback &) {
+  void ApplyValue(const TradeEvent &event, const DepthCallback &) {
     record_.match_flag = event.trial ? 1 : 0;
     std::int64_t packet_volume = 0;
     for (const auto &[price, volume] : event.trades) {
@@ -453,7 +507,7 @@ private:
           record_.low = std::min(record_.low, price);
         }
         record_.total_value +=
-            price * static_cast<double>(volume) * multiplier_;
+            std::abs(price) * static_cast<double>(volume) * multiplier_;
       }
     }
     record_.trade_volume += packet_volume;
@@ -467,43 +521,39 @@ private:
     record_.sequence = event.meta.sequence;
   }
 
-  void ApplyValue(const HighLowEvent &event, bool, const DepthCallback &) {
+  void ApplyValue(const HighLowEvent &event, const DepthCallback &) {
     record_.high = event.high;
     record_.low = event.low;
     last_high_low_sequence_ = event.meta.sequence;
     record_.sequence = event.meta.sequence;
   }
 
-  void ApplyValue(const IncrementalEvent &event, bool continuous,
-                  const DepthCallback &emit) {
+  void ApplyValue(const IncrementalEvent &event, const DepthCallback &emit) {
     record_.orderbook_action = 0;
     for (const auto &level : event.levels) {
       ApplyIncrementalLevel(level);
     }
-    PrepareOutput(event.meta, 0, continuous);
+    PrepareOutput(event.meta, 0);
     emit(record_);
     FinishOutput();
   }
 
-  void ApplyValue(const FullBookEvent &event, bool continuous,
-                  const DepthCallback &emit) {
+  void ApplyValue(const FullBookEvent &event, const DepthCallback &emit) {
     ClearBook();
     for (const auto &level : event.levels) {
       SetSnapshotLevel(level);
     }
     record_.match_flag = event.trial ? 1 : 0;
     record_.orderbook_action = 0;
-    PrepareOutput(event.meta, 3, continuous);
+    PrepareOutput(event.meta, 3);
     emit(record_);
     FinishOutput();
   }
 
-  void PrepareOutput(const EventMeta &meta, std::uint8_t build_type,
-                     bool continuous) {
+  void PrepareOutput(const EventMeta &meta, std::uint8_t build_type) {
     record_.exchtime = meta.exchtime;
     record_.localtime = meta.exchtime;
     record_.build_type = build_type;
-    record_.continuous_flag = continuous && history_complete_ ? 1 : 0;
     record_.sequence = meta.sequence;
   }
 
@@ -605,13 +655,15 @@ private:
   std::uint8_t decimal_locator_{};
   double multiplier_{};
   DecoderStats &stats_;
+  std::vector<ConversionIssue> &issues_;
   DepthRecord record_;
   bool waiting_for_snapshot_{};
-  bool history_complete_{true};
+  bool disabled_{};
   bool has_open_{};
   std::uint64_t last_trade_sequence_{};
   std::uint64_t last_actual_trade_sequence_{};
   std::uint64_t last_high_low_sequence_{};
+  std::optional<std::size_t> active_gap_issue_;
   std::map<std::uint64_t, SequencedEvent> cached_;
 };
 
@@ -712,7 +764,7 @@ struct MessageDecoder::Impl {
     auto [inserted, created] = builders.try_emplace(
         std::string(symbol), trading_day, std::string(symbol),
         metadata->decimal_locator, metadata->multiplier,
-        metadata->reference_price, decoder_stats);
+        metadata->reference_price, decoder_stats, conversion_issues);
     (void)created;
     return &inserted->second;
   }
@@ -760,6 +812,82 @@ struct MessageDecoder::Impl {
       }
       builder->second.SetReferencePrice(ProductReferencePrice(info));
     }
+  }
+
+  void ProcessPriceLimits(const MessageHeader &header,
+                          std::span<const std::uint8_t> body) {
+    RequireVersion(header, 1, "I012");
+    if (body.size() < protocol::kPriceLimitSymbolSize + 2) {
+      throw std::runtime_error("TAIFEX I012 body is too short");
+    }
+
+    PriceLimitInfo info{
+        .symbol = NormalizeText(body.first(protocol::kPriceLimitSymbolSize),
+                                "I012 product symbol"),
+        .raise_limits = {},
+        .fall_limits = {},
+    };
+    std::size_t offset = protocol::kPriceLimitSymbolSize;
+    const auto decode_list = [&](std::string_view side) {
+      const auto count =
+          static_cast<std::size_t>(DecodeBcdInteger(body.subspan(offset, 1)));
+      ++offset;
+      if (count == 0 || count > protocol::kMaximumPriceLimitLevels) {
+        throw std::runtime_error(
+            fmt::format("TAIFEX I012 {} limit count is out of range", side));
+      }
+      const auto bytes = count * protocol::kPriceLimitEntrySize;
+      if (body.size() - offset < bytes) {
+        throw std::runtime_error(
+            fmt::format("TAIFEX I012 {} limit list is truncated", side));
+      }
+      std::vector<PriceLimitLevel> levels;
+      levels.reserve(count);
+      std::array<bool, protocol::kMaximumPriceLimitLevels + 1> seen{};
+      for (std::size_t i = 0; i < count; ++i) {
+        const auto level =
+            static_cast<std::size_t>(DecodeBcdInteger(body.subspan(offset, 1)));
+        if (level == 0 || level > protocol::kMaximumPriceLimitLevels ||
+            seen[level]) {
+          throw std::runtime_error(
+              fmt::format("TAIFEX I012 {} limit level is invalid", side));
+        }
+        seen[level] = true;
+        levels.push_back(
+            {.level = static_cast<std::uint8_t>(level),
+             .price_raw = DecodeBcdInteger(body.subspan(offset + 1, 5))});
+        offset += protocol::kPriceLimitEntrySize;
+      }
+      return levels;
+    };
+
+    info.raise_limits = decode_list("raise");
+    if (offset >= body.size()) {
+      throw std::runtime_error("TAIFEX I012 fall limit count is missing");
+    }
+    info.fall_limits = decode_list("fall");
+    RequireBodySize(body, offset, "I012");
+
+    auto [iterator, inserted] = price_limits.try_emplace(
+        info.symbol,
+        PriceLimitState{.info = info,
+                        .channel_sequence = header.channel_sequence});
+    if (!inserted) {
+      if (iterator->second.info == info) {
+        ++decoder_stats.identical_price_limit_duplicates;
+      } else {
+        ++decoder_stats.price_limit_conflicts;
+        conversion_issues.push_back({
+            .kind = IssueKind::kPriceLimitConflict,
+            .symbol = info.symbol,
+            .transmission_code = header.transmission_code,
+            .message_kind = header.message_kind,
+            .expected_sequence = iterator->second.channel_sequence,
+            .actual_sequence = header.channel_sequence,
+        });
+      }
+    }
+    ++decoder_stats.price_limit_messages;
   }
 
   void ProcessContractBasic(const MessageHeader &header,
@@ -824,8 +952,14 @@ struct MessageDecoder::Impl {
     ++decoder_stats.contract_basic_messages;
   }
 
+  void RecordIgnored(const MessageHeader &header) {
+    ++decoder_stats.ignored_messages;
+    ++ignored_message_counts[std::pair{header.transmission_code,
+                                       header.message_kind}];
+  }
+
   std::optional<std::pair<OrderBookBuilder *, std::uint8_t>>
-  ResolveRealtime(std::span<const std::uint8_t> body) {
+  ResolveRealtime(std::span<const std::uint8_t> body, char message_kind) {
     if (body.size() < protocol::kSymbolSize) {
       throw std::runtime_error(
           "TAIFEX realtime body does not contain a symbol");
@@ -834,6 +968,13 @@ struct MessageDecoder::Impl {
         NormalizeText(body.first(protocol::kSymbolSize), "realtime symbol");
     auto *builder = FindBuilder(symbol);
     if (builder == nullptr) {
+      conversion_issues.push_back({
+          .kind = IssueKind::kMetadataMissing,
+          .symbol = symbol,
+          .transmission_code = '2',
+          .message_kind = message_kind,
+          .actual_sequence = DecodeProductSequence(body.subspan(20, 5)),
+      });
       return std::nullopt;
     }
     return std::pair{builder, builder->decimal_locator()};
@@ -857,7 +998,7 @@ struct MessageDecoder::Impl {
                         count * protocol::kTradeEntrySize +
                         protocol::kTradeSummarySize,
                     "I024");
-    const auto resolved = ResolveRealtime(body);
+    const auto resolved = ResolveRealtime(body, 'D');
     if (!resolved.has_value()) {
       return;
     }
@@ -866,6 +1007,7 @@ struct MessageDecoder::Impl {
     ValidateBinaryFlag(match_flag, "I024 match flag");
     TradeEvent event{
         .meta = {.symbol = NormalizeText(body.first(20), "realtime symbol"),
+                 .message_kind = 'D',
                  .sequence = DecodeProductSequence(body.subspan(20, 5)),
                  .exchtime = trading_day_start_ns + header.exchange_time_ns},
         .trial = match_flag == '1',
@@ -899,13 +1041,14 @@ struct MessageDecoder::Impl {
                       const DepthCallback &emit) {
     RequireVersion(header, 1, "I025");
     RequireBodySize(body, protocol::kHighLowBodySize, "I025");
-    const auto resolved = ResolveRealtime(body);
+    const auto resolved = ResolveRealtime(body, 'E');
     if (!resolved.has_value()) {
       return;
     }
     auto [builder, locator] = *resolved;
     HighLowEvent event{
         .meta = {.symbol = NormalizeText(body.first(20), "realtime symbol"),
+                 .message_kind = 'E',
                  .sequence = DecodeProductSequence(body.subspan(20, 5)),
                  .exchtime = trading_day_start_ns + header.exchange_time_ns},
         .high = DecodeSignedPrice(static_cast<char>(body[25]),
@@ -934,13 +1077,14 @@ struct MessageDecoder::Impl {
                     protocol::kIncrementalHeaderSize +
                         count * protocol::kIncrementalLevelSize,
                     "I081");
-    const auto resolved = ResolveRealtime(body);
+    const auto resolved = ResolveRealtime(body, 'A');
     if (!resolved.has_value()) {
       return;
     }
     auto [builder, locator] = *resolved;
     IncrementalEvent event{
         .meta = {.symbol = NormalizeText(body.first(20), "realtime symbol"),
+                 .message_kind = 'A',
                  .sequence = DecodeProductSequence(body.subspan(20, 5)),
                  .exchtime = trading_day_start_ns + header.exchange_time_ns},
         .levels = {},
@@ -985,7 +1129,7 @@ struct MessageDecoder::Impl {
     RequireBodySize(
         body, protocol::kFullBookHeaderSize + count * protocol::kBookLevelSize,
         "I083");
-    const auto resolved = ResolveRealtime(body);
+    const auto resolved = ResolveRealtime(body, 'B');
     if (!resolved.has_value()) {
       return;
     }
@@ -994,6 +1138,7 @@ struct MessageDecoder::Impl {
     ValidateBinaryFlag(match_flag, "I083 order flag");
     FullBookEvent event{
         .meta = {.symbol = NormalizeText(body.first(20), "realtime symbol"),
+                 .message_kind = 'B',
                  .sequence = DecodeProductSequence(body.subspan(20, 5)),
                  .exchtime = trading_day_start_ns + header.exchange_time_ns},
         .trial = match_flag == '1',
@@ -1171,7 +1316,7 @@ struct MessageDecoder::Impl {
         snapshot_statistics_sequences.clear();
         ++decoder_stats.reset_messages;
       } else {
-        ++decoder_stats.ignored_messages;
+        RecordIgnored(header);
       }
       return;
     }
@@ -1180,13 +1325,15 @@ struct MessageDecoder::Impl {
         ProcessProductBasic(header, body);
       } else if (header.message_kind == '3') {
         ProcessContractBasic(header, body);
+      } else if (header.message_kind == 'A') {
+        ProcessPriceLimits(header, body);
       } else {
-        ++decoder_stats.ignored_messages;
+        RecordIgnored(header);
       }
       return;
     }
     if (header.transmission_code != '2') {
-      ++decoder_stats.ignored_messages;
+      RecordIgnored(header);
       return;
     }
     switch (header.message_kind) {
@@ -1206,28 +1353,41 @@ struct MessageDecoder::Impl {
       ProcessHighLow(header, body, emit);
       break;
     default:
-      ++decoder_stats.ignored_messages;
+      RecordIgnored(header);
       break;
     }
   }
 
-  void Finalize() const {
-    std::size_t unresolved = 0;
-    std::string first_symbol;
-    for (const auto &[symbol, builder] : builders) {
-      if (builder.waiting_for_snapshot()) {
-        ++unresolved;
-        if (first_symbol.empty()) {
-          first_symbol = symbol;
-        }
+  void Finalize() {
+    std::vector<std::string> missing_contract_symbols;
+    for (const auto &[symbol, product] : products) {
+      (void)product;
+      if (contracts.contains(KindId(symbol))) {
+        continue;
+      }
+      const auto already_reported =
+          std::any_of(conversion_issues.begin(), conversion_issues.end(),
+                      [&](const ConversionIssue &issue) {
+                        return issue.kind == IssueKind::kMetadataMissing &&
+                               issue.symbol == symbol;
+                      });
+      if (!already_reported) {
+        missing_contract_symbols.push_back(symbol);
       }
     }
-    if (unresolved != 0) {
-      throw std::runtime_error(fmt::format(
-          "TAIFEX dump ended with {} unresolved product sequence gap(s); "
-          "first_symbol={}",
-          unresolved, first_symbol));
+    std::sort(missing_contract_symbols.begin(), missing_contract_symbols.end());
+    for (const auto &symbol : missing_contract_symbols) {
+      conversion_issues.push_back({.kind = IssueKind::kMetadataMissing,
+                                   .symbol = symbol,
+                                   .transmission_code = '1',
+                                   .message_kind = '3'});
     }
+    decoder_stats.unresolved_sequence_gaps = static_cast<std::uint64_t>(
+        std::count_if(conversion_issues.begin(), conversion_issues.end(),
+                      [](const ConversionIssue &issue) {
+                        return issue.kind == IssueKind::kSequenceGap &&
+                               !issue.recovered;
+                      }));
   }
 
   std::int32_t trading_day{};
@@ -1235,10 +1395,27 @@ struct MessageDecoder::Impl {
   DecoderStats decoder_stats;
   std::unordered_map<std::string, ProductInfo> products;
   std::unordered_map<std::string, ContractInfo> contracts;
+  std::unordered_map<std::string, PriceLimitState> price_limits;
   std::unordered_map<std::string, OrderBookBuilder> builders;
   std::unordered_set<std::string> observed_symbols;
   std::unordered_map<std::string, std::uint64_t> snapshot_statistics_sequences;
+  std::vector<ConversionIssue> conversion_issues;
+  std::map<std::pair<char, char>, std::uint64_t> ignored_message_counts;
 };
+
+std::string_view ToString(IssueKind kind) noexcept {
+  switch (kind) {
+  case IssueKind::kMetadataMissing:
+    return "metadata_missing";
+  case IssueKind::kSequenceGap:
+    return "sequence_gap";
+  case IssueKind::kPriceLimitConflict:
+    return "price_limit_conflict";
+  case IssueKind::kGapCacheOverflow:
+    return "gap_cache_overflow";
+  }
+  return "unknown";
+}
 
 MessageHeader DecodeMessageHeader(std::span<const std::uint8_t> bytes) {
   if (bytes.size() != protocol::kHeaderSize) {
@@ -1300,7 +1477,7 @@ void MessageDecoder::Process(const MessageHeader &header,
   impl_->Process(header, body, emit);
 }
 
-void MessageDecoder::Finalize() const { impl_->Finalize(); }
+void MessageDecoder::Finalize() { impl_->Finalize(); }
 
 std::vector<BasicInfoRecord> MessageDecoder::BasicInfoRecords() const {
   std::vector<std::string> symbols;
@@ -1323,8 +1500,7 @@ std::vector<BasicInfoRecord> MessageDecoder::BasicInfoRecords() const {
     const auto kind_id = KindId(symbol);
     const auto contract_iterator = impl_->contracts.find(kind_id);
     if (contract_iterator == impl_->contracts.end()) {
-      throw std::runtime_error(
-          fmt::format("missing TAIFEX I011 metadata for symbol {}", symbol));
+      continue;
     }
     const auto &contract = contract_iterator->second;
     BasicInfoRecord record{
@@ -1374,6 +1550,21 @@ std::vector<BasicInfoRecord> MessageDecoder::BasicInfoRecords() const {
       record.dynamic_banding = product.dynamic_banding;
     }
     output.push_back(std::move(record));
+  }
+  return output;
+}
+
+const std::vector<ConversionIssue> &MessageDecoder::issues() const noexcept {
+  return impl_->conversion_issues;
+}
+
+std::vector<IgnoredMessageCount> MessageDecoder::IgnoredMessageCounts() const {
+  std::vector<IgnoredMessageCount> output;
+  output.reserve(impl_->ignored_message_counts.size());
+  for (const auto &[message_type, count] : impl_->ignored_message_counts) {
+    output.push_back({.transmission_code = message_type.first,
+                      .message_kind = message_type.second,
+                      .count = count});
   }
   return output;
 }

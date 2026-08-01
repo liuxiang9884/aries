@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -68,6 +69,10 @@ TEST_F(TaifexDumpConverterTest, ConvertsAndPublishesDepthAndBasicCsv) {
   EXPECT_NE(depth.find("20260707,TAIFEX,TXFG6,-1,"), std::string::npos);
   EXPECT_NE(depth.find(",22100.000000,3,3,13260000.000000,2,1,"),
             std::string::npos);
+  EXPECT_EQ(depth.find("continuous_flag"), std::string::npos);
+  const auto header_end = depth.find('\n');
+  ASSERT_NE(header_end, std::string::npos);
+  EXPECT_EQ(std::count(depth.begin(), depth.begin() + header_end, ','), 43);
 
   std::ifstream basic_input(basic_output_path_, std::ios::binary);
   const std::string basic_csv((std::istreambuf_iterator<char>(basic_input)),
@@ -132,6 +137,48 @@ TEST_F(TaifexDumpConverterTest, RejectsTruncatedTrailerWithoutPublishing) {
   EXPECT_THROW((void)ConvertDump(Options()), std::runtime_error);
   EXPECT_FALSE(std::filesystem::exists(output_path_));
   EXPECT_FALSE(std::filesystem::exists(basic_output_path_));
+}
+
+TEST_F(TaifexDumpConverterTest, PublishesOutputsWithUnresolvedGapSummary) {
+  std::vector<std::uint8_t> dump;
+  const auto kind = test::MakeI011("TXF", 200.0);
+  test::AppendFrame(dump, '1', '3', 4, kind);
+  const auto basic = test::MakeI010("TXFG6", 22'000'00);
+  test::AppendFrame(dump, '1', '1', 9, basic, 2);
+  const auto update = test::MakeI081(
+      "TXFG6", 2, '0',
+      {.type = '0', .price = 22'000'00, .volume = 7, .level = 1});
+  test::AppendFrame(dump, '2', 'A', 1, update, 3);
+  test::WriteBinaryFile(dump_path_, dump);
+
+  const auto stats = ConvertDump(Options());
+
+  EXPECT_TRUE(std::filesystem::exists(output_path_));
+  EXPECT_TRUE(std::filesystem::exists(basic_output_path_));
+  EXPECT_EQ(stats.unresolved_sequence_gaps, 1);
+  ASSERT_EQ(stats.issues.size(), 1);
+  EXPECT_EQ(stats.issues.front().symbol, "TXFG6");
+  EXPECT_FALSE(stats.issues.front().recovered);
+}
+
+TEST_F(TaifexDumpConverterTest, PublishesOutputsWhenMetadataNeverArrives) {
+  std::vector<std::uint8_t> dump;
+  const auto update = test::MakeI081(
+      "TXFG6", 1, '0',
+      {.type = '0', .price = 22'000'00, .volume = 7, .level = 1});
+  test::AppendFrame(dump, '2', 'A', 1, update);
+  test::WriteBinaryFile(dump_path_, dump);
+
+  const auto stats = ConvertDump(Options());
+
+  EXPECT_TRUE(std::filesystem::exists(output_path_));
+  EXPECT_TRUE(std::filesystem::exists(basic_output_path_));
+  EXPECT_EQ(stats.rows_written, 0);
+  EXPECT_EQ(stats.basic_info_rows, 0);
+  EXPECT_EQ(stats.metadata_missing_messages, 1);
+  ASSERT_EQ(stats.issues.size(), 1);
+  EXPECT_EQ(stats.issues.front().kind, IssueKind::kMetadataMissing);
+  EXPECT_EQ(stats.issues.front().symbol, "TXFG6");
 }
 
 } // namespace

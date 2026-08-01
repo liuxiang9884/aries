@@ -241,39 +241,49 @@ depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正�
 
 ```text
 /data/tw/raw/future/taifex_20260707.dump.tar.gz
+/tw_backup/data/tw/raw/future/taifex_20260707.dump
 ```
 
 归档为 1,213,053,544 bytes，唯一 member 解压后为 6,005,844,926 bytes。解压文件
-只放在 `/home/liuxiang/tmp` 完成验证，正式结果生成后删除；原始压缩包保留不变。
+保留在 `/tw_backup/data/tw/raw/future/`；原始压缩包也保留不变。
 
-实际命令：
+当前 44 列/non-negative value contract 的完整 dry-run：
 
 ```bash
 ./build/release/data/converter/taifex_dump_converter \
-  --dump /home/liuxiang/tmp/aries-taifex-real-20260707/taifex_20260707.dump \
+  --dump /tw_backup/data/tw/raw/future/taifex_20260707.dump \
   --trading-day 20260707 \
-  --output /data/tw/csv/future/taifex_20260707_future.csv \
-  --basic-output /data/tw/csv/future/taifex_20260707_future_basic_info.csv \
-  --overwrite
+  --dry-run
 ```
 
-converter 完整读取 62,559,197 条消息，输出 54,221,272 条 depth 数据行；处理
-181,201 条 I010 与 66,096 条 I011，去除 245,178 条一致重复后得到 4,839 条
-basic-info。9 条 realtime 在 metadata 前到达，形成 4 个 product sequence gap，
-全部由 I084 恢复；没有 stale 或 EOF 未恢复 gap。
+converter 完整读取 62,559,197 条消息，模拟输出 54,221,272 条 depth 数据行；处理
+181,201 条 I010、66,096 条 I011 与 181,280 条 I012。I010/I011 一致重复为
+245,178 条，I012 一致重复为 179,520 条、冲突为 0，basic-info 为 4,839 条。
+9 条 realtime 在 metadata 前到达；4 个 product sequence gap 全部恢复，没有 stale、
+EOF 未恢复 gap 或 cache overflow。ignored 总数为 2,315,494，并按
+transmission/message kind 分项记录。
+
+metadata-before-basic 涉及 `TJFH6/L6`、`TJFL6`、`TJFG6`；gap 涉及
+`TJFG6`、`TJFL6`、`TJFH6`、`TJFH6/L6`。完整 dry-run 成功，wall time
+1:53.56，最大 RSS 270,316 KiB。
+
+下表是 2026-08-01 schema/value 修改前的历史 Aries 输出，不是当前 44 列、
+`abs(price) * volume * multiplier` contract 的 hash 基线：
 
 | 输出 | bytes | 数据行 | 列数 | SHA-256 |
 |---|---:|---:|---:|---|
 | `/data/tw/csv/future/taifex_20260707_future.csv` | 18,034,209,936 | 54,221,272 | 45 | `5dd579b47fd1b0ee803c076d36cef58e14631741c9672051283ca16a228688f1` |
 | `/data/tw/csv/future/taifex_20260707_future_basic_info.csv` | 487,542 | 4,839 | 27 | `200f3c86d6f788a99f23d733f4ccdd28c91044085963c4d4c32b9ea0b6094577` |
 
-独立全文件检查确认 depth 每行 45 列、2,923 个有 depth 的 symbol 内 sequence
+历史输出的独立全文件检查确认 depth 每行 45 列、2,923 个有 depth 的 symbol 内 sequence
 严格递增，identity/time/volume/flag/high-low 约束无异常；basic-info 每行 27 列、
 symbol 排序且唯一、multiplier 全部大于 0。43,388 行包含负 signed price/value，
 全部来自 calendar spread。发生 gap 的 4 个 symbol 共 441,094 行持续标记
 `continuous_flag=0`，防止下游把无法完整重建的累计 `total_value` 当作完整 history。
 
-TAIFEX 45/27 列 schema、multiplier/value 口径、恢复语义、Orion 差异和夜盘边界见
+当前全量任务会把 44/27 列结果写入 `/tw_backup/data/tw/csv/future/`；每个交易日
+独立记录 success/failure 和 symbol 级问题，完成后再建立当前 contract 的 manifest
+与 hash 基线。TAIFEX schema、multiplier/value 口径、恢复语义、Orion 差异和夜盘边界见
 `data/converter/docs/taifex.md`。
 
 ## 未完成事项
@@ -283,6 +293,6 @@ TAIFEX 45/27 列 schema、multiplier/value 口径、恢复语义、Orion 差异�
 - TAIFEX 当前只允许正式转换日盘。夜盘支持 deferred；未来启用前必须建立交易日到
   事件自然日的交易日历映射，并补真实夜盘回归和 timestamp 一致性检查。
 - 为 TAIFEX/TWSE 输出建立 manifest 与明确 schema version，记录输入 hash、工具
-  commit、输出 hash、质量统计和 `continuous_flag` 覆盖。
+  commit、输出 hash、质量统计和交易日/symbol 问题摘要。
 - 为 TWSE 设计包含 bid / ask volume 的正式版本化 schema；在 contract、
   manifest 和迁移规则锁定前，不把当前 23 列 CSV 当作正式研究数据集。

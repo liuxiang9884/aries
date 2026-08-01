@@ -67,6 +67,7 @@ version、channel 和 channel sequence。
 | I001 heartbeat | `0/1` | 1 | 校验空 body |
 | I002 reset | `0/2` | 1 | 清空 realtime book、sequence 与 cache，保留 metadata |
 | I010 product basic | `1/1` | 9 | 解析已知前 32 bytes；真实扩展 8 bytes 不解释 |
+| I012 product price limits | `1/A` | 1 | 解析并校验 1–99 阶涨停/跌停价格；当前不写 CSV |
 | I011 contract basic | `1/3` | 4 | 解析 multiplier、currency、decimal locator 等 |
 | I081 incremental book | `2/A` | 1 | 按 entry 顺序更新，输出完整状态 |
 | I083 full book | `2/B` | 1 | 先清空普通五档与 derived quote，再输出完整状态 |
@@ -87,14 +88,18 @@ flow group 等。I011 是三字符 `kind_id` 级资料，`CONTRACT-SIZE` 按
 outright 同时使用 I010 和对应 I011，并要求 decimal locator 一致。calendar
 spread 没有 I010，使用 symbol 前三字符匹配 I011，因而仍可正确解码 signed price
 和 multiplier。若 realtime 早于 metadata，禁止默认为 decimal 0：消息计入
-`metadata_missing_messages` 并跳过，后续 sequence gap 由 I084 恢复。
+`metadata_missing_messages` 并跳过，按 symbol/message/sequence 记录问题；后续
+sequence gap 由 I083/I084 恢复。若直到 EOF 都没有 I011，仍发布其余合约的 CSV，
+该 symbol 不产生 depth/basic-info 行。
 
 I010/I011 会在盘中轮播。影响输出的字段完全相同则去重并计数；同 symbol/kind 的
-字段发生冲突时转换失败。I011 的 Big5/CP950 `NAME` 不解析、不输出。
+字段发生冲突时转换失败。I012 也会轮播：严格校验两侧阶数、唯一 level、BCD 与
+exact body length；相同内容去重，内容变化记录 `price_limit_conflict` 并继续，
+不改写 I010 `reference_price`。I011 的 Big5/CP950 `NAME` 不解析、不输出。
 
 ## Depth CSV contract
 
-depth CSV 固定为 45 列：
+depth CSV 固定为 44 列：
 
 ```text
 trading_day,market,symbol,symbol_id,exchtime,localtime,
@@ -103,7 +108,7 @@ total_buy_count,total_sell_count,
 ask_price1,ask_volume1,bid_price1,bid_volume1,...,
 ask_price5,ask_volume5,bid_price5,bid_volume5,
 derived_ask_price,derived_ask_volume,derived_bid_price,derived_bid_volume,
-match_flag,build_type,orderbook_action,continuous_flag,sequence
+match_flag,build_type,orderbook_action,sequence
 ```
 
 关键语义：
@@ -114,16 +119,15 @@ match_flag,build_type,orderbook_action,continuous_flag,sequence
 - 所有 price 和 `total_value` 的内部类型为 `double`，CSV 固定 6 位小数。
 - `trade_volume` 是上次 depth 输出之后的成交 contract 数，输出后归零；
   `total_volume` 直接采用 I024 `MATCH-TOTAL-QTY`。
-- `total_value` 累计 `signed price * contracts * multiplier`。因此 calendar
-  spread 可以为负；这是 signed spread notional，不等同于保证金、现金成交额或
-  underlying notional。
+- `total_value` 累计 `abs(price) * contracts * multiplier`，单位为 basic-info
+  `currency`。calendar spread 使用价差绝对值，保证累计值非负；它不是两条腿
+  gross notional，也不等同于保证金或实际现金流。
 - `total_buy_count`、`total_sell_count` 是 exchange 累计成交笔数，不是盘口量。
 - `match_flag` 输出 `0=actual`、`1=trial`，不输出 ASCII 数值 48/49。
 - `build_type=0` 表示 I081，`3` 表示 I083；`orderbook_action=1` 表示本条 I081
   包含 insert/delete。
-- `continuous_flag=0` 表示 converter 已知该 symbol 的历史发生缺口。I084 可以
-  恢复当前 book、total volume 和统计值，但不能恢复缺失成交的累计
-  `total_value`，因此该标志在同一 session 后续行保持 0，直到 I002 reset。
+- sequence gap 不再复制成每行 flag；converter 在完成日志中逐项输出日期、symbol、
+  消息类型、缺失序号和恢复状态。研究使用前必须先审查对应日期的日志摘要。
 
 一行只由 I081/I083 触发。I024/I025 的更新合并到下一条 book 行；这是 event
 state CSV，不是逐类消息明细表。
@@ -158,9 +162,11 @@ block_trade_flag,expiry_type,underlying_type,close_group,end_session
 trade/high-low sequence 分字段合并：可安全恢复的统计会接纳，较新的实时状态不会被
 旧 snapshot 回滚；正常轮播也不会覆盖实时状态。
 
-每个 symbol 的 cache 上限为 8,192 条。exact EOF 时仍有未恢复 gap 会使转换失败，
-不发布 CSV。frame/header/body/basic conflict、未知 handled version、非法 enum/level、
-cache overflow 和输出 I/O 错误同样失败。
+每个 symbol 的 cache 上限为 8,192 条。metadata 缺失、sequence gap、EOF 未恢复 gap、
+I012 内容变化和 cache overflow 都记录到日志但不阻止当日其余数据发布；cache overflow
+后停用受影响 symbol，避免继续使用不可信状态。frame/header/body、I010/I011 conflict、
+未知 handled version、非法 BCD/enum/level、checksum/trailer 和输出 I/O 错误仍使当日
+失败；批处理必须记录该日失败并继续下一日。
 
 两份输出先写同目录 `.partial.<pid>`。完整解码、EOF finalization、basic-info 排序和
 成功 close 后才发布；`--overwrite` 会先备份两份旧文件，并在进程内 rename 失败时
@@ -181,8 +187,9 @@ cache overflow 和输出 I/O 错误同样失败。
 | 买卖统计 | 写入名为 bid/ask volume 的字段 | 正确命名为 buy/sell trade count |
 | multiplier/value | value 未乘 contract multiplier | I011 解析 multiplier，value 按 contract size 计算 |
 | flag | `match_flag` 可能输出 ASCII 48/49 | 输出语义值 0/1 |
-| gap cache | 保存 SHM buffer pointer，部分 empty/end 边界不安全 | 保存 decoded value，边界检查并在 EOF 拒绝未恢复 gap |
+| gap cache | 保存 SHM buffer pointer，部分 empty/end 边界不安全 | 保存 decoded value；gap/overflow 形成日级问题摘要，不阻止其余 symbol 发布 |
 | I084 S | 未合并 recovery statistics | 按字段 sequence 合并，恢复缺失统计且不回滚较新事件 |
+| I012 | 未进入 offline research schema | 按 V1.5.1 严格解析/校验和分类计数，不误作 reference price 更新 |
 | frame 检查 | dump 路径不完整校验 checksum/terminal | 每条 frame 严格校验并原子保护旧输出 |
 
 Aries 不是 Orion 40 列 stock-future CSV 的 byte-compatible 替代品；这是包含
@@ -199,23 +206,31 @@ volume、multiplier、全部 futures 和明确恢复语义的新 research schema
   以后启用夜盘前，必须先建立交易日到事件自然日的交易日历映射，覆盖周一交易日
   对应上周五夜盘等跨周边界，并补充真实夜盘回归与 timestamp 一致性测试。
 - gap 后 I084 可恢复 book 与 exchange summary，不能重建遗漏成交的精确累计 value；
-  必须使用 `continuous_flag` 过滤或分层分析。
-- I140、I012、I030、I070-I073 等合法消息当前只做 frame 校验，不输出其状态字段。
+  当前 CSV 不含逐行质量 flag，必须结合每个交易日的转换日志过滤或分层分析。
+- I012 已严格解析但暂不输出可变长涨跌停列表；I140、I030、I070-I073 等合法消息
+  当前只做 frame 校验和分类型计数，不输出其状态字段。
 
 ## 2026-07-07 真实数据验证
 
 输入归档为 `/data/tw/raw/future/taifex_20260707.dump.tar.gz`，压缩文件
 1,213,053,544 bytes，内部唯一 member `taifex_20260707.dump` 为
-6,005,844,926 bytes。Release converter 对完整 dump 的结果：
+6,005,844,926 bytes。使用当前 44 列/non-negative value contract 的 Release
+converter 完整 dry-run：
 
 ```text
 messages=62559197 depth_rows=54221272 symbols=4839
-i010=181201 i011=66096 basic_duplicates=245178 basic_rows=4839
-ignored=2496774 metadata_missing=9 sequence_gaps=4 stale=0 recoveries=4
-resets=0 bytes=6005844926
+i010=181201 i011=66096 i012=181280
+basic_duplicates=245178 i012_duplicates=179520 i012_conflicts=0 basic_rows=4839
+ignored=2315494 metadata_missing=9 sequence_gaps=4 unresolved_gaps=0
+stale=0 recoveries=4 cache_overflows=0 resets=0 bytes=6005844926
 ```
 
-正式输出：
+9 条 metadata-before-basic 问题涉及 `TJFH6/L6`、`TJFL6`、`TJFG6`；4 个 gap
+涉及 `TJFG6`、`TJFL6`、`TJFH6`、`TJFH6/L6`，均已恢复。ignored message 已按
+transmission/kind 分项写入日志。
+
+下表是 2026-08-01 schema/value 修改前的**历史输出**，只用于追溯初版 converter，
+不得作为当前 44 列/non-negative value contract 的 hash 基线：
 
 | 文件 | bytes | 数据行 | 列数 | SHA-256 |
 |---|---:|---:|---:|---|
@@ -239,3 +254,6 @@ resets=0 bytes=6005844926
 - basic contract type 分布为 S 4,626、I 164、E 29、C 20；currency 分布为
   TWD 4,803、USD 19、CNY 12、JPY 5。
 - 输出目录没有 `.partial.*` 或 `.backup.*` 残留。
+
+这些扫描结论同样属于历史 45 列输出；当前全量重建写入
+`/tw_backup/data/tw/csv/future/`，完成后应另建当前 contract 的 manifest/hash。

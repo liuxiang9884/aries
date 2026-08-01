@@ -30,7 +30,7 @@ constexpr std::string_view kDepthHeader =
     "ask_price4,ask_volume4,bid_price4,bid_volume4,"
     "ask_price5,ask_volume5,bid_price5,bid_volume5,"
     "derived_ask_price,derived_ask_volume,derived_bid_price,derived_bid_volume,"
-    "match_flag,build_type,orderbook_action,continuous_flag,sequence\n";
+    "match_flag,build_type,orderbook_action,sequence\n";
 
 constexpr std::string_view kBasicHeader =
     "trading_day,market,symbol,kind_id,is_spread,basic_source,contract_type,"
@@ -289,12 +289,11 @@ struct CsvWriter::Impl {
                      record.ask_price[i], record.ask_volume[i],
                      record.bid_price[i], record.bid_volume[i]);
     }
-    fmt::format_to(
-        std::back_inserter(row), "{:.6f},{},{:.6f},{},{},{},{},{},{}\n",
-        record.derived_ask_price, record.derived_ask_volume,
-        record.derived_bid_price, record.derived_bid_volume, record.match_flag,
-        record.build_type, record.orderbook_action, record.continuous_flag,
-        record.sequence);
+    fmt::format_to(std::back_inserter(row), "{:.6f},{},{:.6f},{},{},{},{},{}\n",
+                   record.derived_ask_price, record.derived_ask_volume,
+                   record.derived_bid_price, record.derived_bid_volume,
+                   record.match_flag, record.build_type,
+                   record.orderbook_action, record.sequence);
     depth.Write(std::string_view(row.data(), row.size()));
   }
 

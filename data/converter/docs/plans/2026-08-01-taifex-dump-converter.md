@@ -1,5 +1,10 @@
 # TAIFEX dump converter 实现计划
 
+> 本文保留初版实施计划与当时的 45 列/`continuous_flag` 设计记录。2026-08-01
+> 后续统一 contract 已改为 44 列、`total_value = abs(price) * volume * multiplier`，
+> gap/metadata 质量改写入逐日日志；当前事实以 `../taifex.md` 和
+> `2026-08-01-unified-market-value.md` 为准。
+
 ## 目标
 
 在 `data/converter/taifex/` 实现不依赖 shared memory 的同步 converter，直接把

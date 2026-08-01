@@ -145,12 +145,19 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
   stats.product_basic_messages = decoder_stats.product_basic_messages;
   stats.contract_basic_messages = decoder_stats.contract_basic_messages;
   stats.basic_duplicates = decoder_stats.identical_basic_duplicates;
+  stats.price_limit_messages = decoder_stats.price_limit_messages;
+  stats.price_limit_duplicates = decoder_stats.identical_price_limit_duplicates;
+  stats.price_limit_conflicts = decoder_stats.price_limit_conflicts;
   stats.ignored_messages = decoder_stats.ignored_messages;
   stats.metadata_missing_messages = decoder_stats.metadata_missing_messages;
   stats.sequence_gaps = decoder_stats.sequence_gaps;
   stats.stale_messages = decoder_stats.stale_messages;
   stats.snapshot_recoveries = decoder_stats.snapshot_recoveries;
+  stats.unresolved_sequence_gaps = decoder_stats.unresolved_sequence_gaps;
+  stats.gap_cache_overflows = decoder_stats.gap_cache_overflows;
   stats.reset_messages = decoder_stats.reset_messages;
+  stats.issues = decoder.issues();
+  stats.ignored_message_counts = decoder.IgnoredMessageCounts();
   if (writer != nullptr) {
     writer->Commit(basic_records);
   }

@@ -62,7 +62,6 @@ struct DepthRecord {
   std::uint8_t match_flag{};
   std::uint8_t build_type{};
   std::uint8_t orderbook_action{};
-  std::uint8_t continuous_flag{1};
   std::uint64_t sequence{};
 };
 

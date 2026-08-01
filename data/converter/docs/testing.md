@@ -115,23 +115,25 @@ ctest --test-dir build/debug --output-on-failure -R 'Taifex|taifex'
 ```
 
 测试覆盖 BCD/header、I010/I011、outright/spread metadata、multiplier、I024 多笔
-成交、I025 high/low、I081 顺序更新、I083 全量清空、I084 gap recovery、I002
-reset、零价 spread 开盘、snapshot statistics 防回滚/安全合并、未恢复 gap EOF
-failure、checksum、truncated trailer、dry-run 和双 CSV 原子发布。
+成交、negative spread 的非负 `total_value`、I012 涨跌停解析/重复/冲突、I025
+high/low、I081 顺序更新、I083 全量清空、I084 gap recovery、I002 reset、零价
+spread 开盘、snapshot statistics 防回滚/安全合并、未恢复 gap 与永久 metadata
+缺失的问题摘要/继续发布、单 symbol cache overflow 隔离、checksum、truncated
+trailer、dry-run 和双 CSV 原子发布。
 
 ## TAIFEX 完整 Dump 验证
 
 ```bash
 ./build/release/data/converter/taifex_dump_converter \
-  --dump /home/liuxiang/tmp/aries-taifex-real-20260707/taifex_20260707.dump \
+  --dump /tw_backup/data/tw/raw/future/taifex_20260707.dump \
   --trading-day 20260707 \
   --dry-run
 
 ./build/release/data/converter/taifex_dump_converter \
-  --dump /home/liuxiang/tmp/aries-taifex-real-20260707/taifex_20260707.dump \
+  --dump /tw_backup/data/tw/raw/future/taifex_20260707.dump \
   --trading-day 20260707 \
-  --output /data/tw/csv/future/taifex_20260707_future.csv \
-  --basic-output /data/tw/csv/future/taifex_20260707_future_basic_info.csv \
+  --output /tw_backup/data/tw/csv/future/taifex_20260707_future.csv \
+  --basic-output /tw_backup/data/tw/csv/future/taifex_20260707_future_basic_info.csv \
   --overwrite
 ```
 
@@ -139,12 +141,14 @@ failure、checksum、truncated trailer、dry-run 和双 CSV 原子发布。
 
 ```text
 messages=62559197 depth_rows=54221272 symbols=4839
-i010=181201 i011=66096 basic_duplicates=245178 basic_rows=4839
-ignored=2496774 metadata_missing=9 sequence_gaps=4 stale=0 recoveries=4
-resets=0 bytes=6005844926
+i010=181201 i011=66096 i012=181280
+basic_duplicates=245178 i012_duplicates=179520 i012_conflicts=0 basic_rows=4839
+ignored=2315494 metadata_missing=9 sequence_gaps=4 unresolved_gaps=0
+stale=0 recoveries=4 cache_overflows=0 resets=0 bytes=6005844926
 ```
 
-完整 CSV 另用独立扫描检查：depth header/每行为 45 列、basic-info 为 27 列，
+完整 CSV 另用独立扫描检查：depth header/每行为 44 列、basic-info 为 27 列，
 `symbol_id=-1`、`localtime=exchtime`、volume/flag/high-low 合法、每个 depth symbol
 sequence 严格递增、basic symbol 排序且唯一、multiplier 大于 0。负价格必须只出现在
-calendar spread。固定基线与 SHA-256 记录在 `data/docs/data.md`。
+calendar spread，`total_value` 必须非负。当前 contract 的全量重建输出位于
+`/tw_backup/data/tw/csv/future/`；完成后再记录固定 hash 基线。

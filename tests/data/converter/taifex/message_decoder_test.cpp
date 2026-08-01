@@ -62,8 +62,99 @@ TEST(TaifexMessageDecoderTest, BuildsTradeAndIncrementalBookWithMultiplier) {
   EXPECT_EQ(row.match_flag, 0);
   EXPECT_EQ(row.build_type, 0);
   EXPECT_EQ(row.orderbook_action, 1);
-  EXPECT_EQ(row.continuous_flag, 1);
   EXPECT_EQ(row.sequence, 3);
+}
+
+TEST(TaifexMessageDecoderTest, AccumulatesAbsoluteValueForNegativeSpreadTrade) {
+  MessageDecoder decoder(20260707);
+  std::vector<DepthRecord> rows;
+  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  const auto kind = test::MakeI011("TXF", 200.0);
+  decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
+  const auto trade =
+      test::MakeI024("TXFG6/H6", 1, 125, 4, 4, 1, 0, '0', {}, '-');
+  decoder.Process(Header('2', 'D', 1, trade.size()), trade, emit);
+  const auto update = test::MakeI081(
+      "TXFG6/H6", 2, '0', {.type = '0', .price = 100, .volume = 3, .level = 1});
+  decoder.Process(Header('2', 'A', 1, update.size()), update, emit);
+
+  ASSERT_EQ(rows.size(), 1);
+  EXPECT_DOUBLE_EQ(rows.front().last_price, -1.25);
+  EXPECT_DOUBLE_EQ(rows.front().total_value, 1'000.0);
+}
+
+TEST(TaifexMessageDecoderTest,
+     ParsesPriceLimitsWithoutChangingOpeningReferencePrice) {
+  MessageDecoder decoder(20260707);
+  std::vector<DepthRecord> rows;
+  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  const auto kind = test::MakeI011("TXF", 200.0);
+  decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
+  const auto basic = test::MakeI010("TXFG6", 22'000'00);
+  decoder.Process(Header('1', '1', 9, basic.size()), basic, emit);
+  constexpr std::array<test::PriceLimit, 2> kRaise{{
+      {.level = 1, .price = 24'200'00},
+      {.level = 2, .price = 26'400'00},
+  }};
+  constexpr std::array<test::PriceLimit, 2> kFall{{
+      {.level = 1, .price = 19'800'00},
+      {.level = 2, .price = 17'600'00},
+  }};
+  const auto limits = test::MakeI012("TXFG6", kRaise, kFall);
+  decoder.Process(Header('1', 'A', 1, limits.size()), limits, emit);
+  decoder.Process(Header('1', 'A', 1, limits.size()), limits, emit);
+  const auto update = test::MakeI081(
+      "TXFG6", 1, '0',
+      {.type = '0', .price = 22'000'00, .volume = 3, .level = 1});
+  decoder.Process(Header('2', 'A', 1, update.size()), update, emit);
+
+  ASSERT_EQ(rows.size(), 1);
+  EXPECT_DOUBLE_EQ(rows.front().reference_price, 22'000.0);
+  EXPECT_EQ(decoder.stats().price_limit_messages, 2);
+  EXPECT_EQ(decoder.stats().identical_price_limit_duplicates, 1);
+  EXPECT_EQ(decoder.stats().ignored_messages, 0);
+}
+
+TEST(TaifexMessageDecoderTest,
+     RecordsConflictingPriceLimitsAndKeepsConverting) {
+  MessageDecoder decoder(20260707);
+  const auto emit = [](const DepthRecord &) {};
+  constexpr std::array<test::PriceLimit, 1> kRaise{{
+      {.level = 1, .price = 24'200'00},
+  }};
+  constexpr std::array<test::PriceLimit, 1> kFall{{
+      {.level = 1, .price = 19'800'00},
+  }};
+  constexpr std::array<test::PriceLimit, 1> kChangedFall{{
+      {.level = 1, .price = 19'700'00},
+  }};
+  const auto first = test::MakeI012("TXFG6", kRaise, kFall);
+  decoder.Process(Header('1', 'A', 1, first.size()), first, emit);
+  const auto changed = test::MakeI012("TXFG6", kRaise, kChangedFall);
+  auto changed_header = Header('1', 'A', 1, changed.size());
+  changed_header.channel_sequence = 2;
+  decoder.Process(changed_header, changed, emit);
+
+  EXPECT_EQ(decoder.stats().price_limit_messages, 2);
+  EXPECT_EQ(decoder.stats().price_limit_conflicts, 1);
+  ASSERT_EQ(decoder.issues().size(), 1);
+  EXPECT_EQ(decoder.issues().front().kind, IssueKind::kPriceLimitConflict);
+  EXPECT_EQ(decoder.issues().front().symbol, "TXFG6");
+  EXPECT_EQ(decoder.issues().front().expected_sequence, 1);
+  EXPECT_EQ(decoder.issues().front().actual_sequence, 2);
+}
+
+TEST(TaifexMessageDecoderTest, RejectsPriceLimitsWithoutBothSides) {
+  MessageDecoder decoder(20260707);
+  const auto emit = [](const DepthRecord &) {};
+  constexpr std::array<test::PriceLimit, 1> kFall{{
+      {.level = 1, .price = 19'800'00},
+  }};
+  const auto limits = test::MakeI012("TXFG6", {}, kFall);
+
+  EXPECT_THROW(
+      decoder.Process(Header('1', 'A', 1, limits.size()), limits, emit),
+      std::runtime_error);
 }
 
 TEST(TaifexMessageDecoderTest, PreservesZeroOpeningPriceForCalendarSpread) {
@@ -194,9 +285,12 @@ TEST(TaifexMessageDecoderTest, RecoversGapFromI084AndReplaysCachedUpdate) {
   EXPECT_EQ(rows.back().bid_price[0], 22003.0);
   EXPECT_EQ(rows.back().bid_volume[0], 9);
   EXPECT_EQ(rows.back().sequence, 4);
-  EXPECT_EQ(rows.back().continuous_flag, 0);
   EXPECT_EQ(decoder.stats().sequence_gaps, 1);
   EXPECT_EQ(decoder.stats().snapshot_recoveries, 1);
+  ASSERT_EQ(decoder.issues().size(), 1);
+  EXPECT_EQ(decoder.issues().front().kind, IssueKind::kSequenceGap);
+  EXPECT_TRUE(decoder.issues().front().recovered);
+  EXPECT_EQ(decoder.issues().front().recovery_sequence, 2);
 }
 
 TEST(TaifexMessageDecoderTest, UsesKindMetadataForSpread) {
@@ -258,7 +352,6 @@ TEST(TaifexMessageDecoderTest,
   EXPECT_DOUBLE_EQ(rows.back().low, 10000.0);
   EXPECT_EQ(rows.back().trade_volume, 2);
   EXPECT_EQ(rows.back().total_volume, 2);
-  EXPECT_EQ(rows.back().continuous_flag, 0);
 }
 
 TEST(TaifexMessageDecoderTest,
@@ -301,7 +394,7 @@ TEST(TaifexMessageDecoderTest,
   EXPECT_EQ(rows.back().total_sell_count, 3);
 }
 
-TEST(TaifexMessageDecoderTest, RejectsUnresolvedGapAtEndOfDump) {
+TEST(TaifexMessageDecoderTest, ReportsUnresolvedGapAtEndOfDump) {
   MessageDecoder decoder(20260707);
   const auto emit = [](const DepthRecord &) {};
   const auto kind = test::MakeI011("TXF", 200.0);
@@ -313,7 +406,77 @@ TEST(TaifexMessageDecoderTest, RejectsUnresolvedGapAtEndOfDump) {
       {.type = '0', .price = 22'000'00, .volume = 5, .level = 1});
   decoder.Process(Header('2', 'A', 1, after_gap.size()), after_gap, emit);
 
-  EXPECT_THROW(decoder.Finalize(), std::runtime_error);
+  EXPECT_NO_THROW(decoder.Finalize());
+  EXPECT_EQ(decoder.stats().unresolved_sequence_gaps, 1);
+  ASSERT_EQ(decoder.issues().size(), 1);
+  EXPECT_EQ(decoder.issues().front().kind, IssueKind::kSequenceGap);
+  EXPECT_EQ(decoder.issues().front().symbol, "TXFG6");
+  EXPECT_EQ(decoder.issues().front().expected_sequence, 1);
+  EXPECT_EQ(decoder.issues().front().actual_sequence, 2);
+  EXPECT_FALSE(decoder.issues().front().recovered);
+}
+
+TEST(TaifexMessageDecoderTest, ReportsMetadataMissingAndIgnoredMessageTypes) {
+  MessageDecoder decoder(20260707);
+  const auto emit = [](const DepthRecord &) {};
+  const auto update = test::MakeI081(
+      "TXFG6", 7, '0',
+      {.type = '0', .price = 22'000'00, .volume = 5, .level = 1});
+  decoder.Process(Header('2', 'A', 1, update.size()), update, emit);
+  const std::vector<std::uint8_t> ignored;
+  decoder.Process(Header('1', '2', 1, ignored.size()), ignored, emit);
+
+  ASSERT_EQ(decoder.issues().size(), 1);
+  EXPECT_EQ(decoder.issues().front().kind, IssueKind::kMetadataMissing);
+  EXPECT_EQ(decoder.issues().front().symbol, "TXFG6");
+  EXPECT_EQ(decoder.issues().front().actual_sequence, 7);
+  const auto counts = decoder.IgnoredMessageCounts();
+  ASSERT_EQ(counts.size(), 1);
+  EXPECT_EQ(counts.front().transmission_code, '1');
+  EXPECT_EQ(counts.front().message_kind, '2');
+  EXPECT_EQ(counts.front().count, 1);
+}
+
+TEST(TaifexMessageDecoderTest,
+     ReportsProductWhoseContractMetadataNeverArrives) {
+  MessageDecoder decoder(20260707);
+  const auto emit = [](const DepthRecord &) {};
+  const auto basic = test::MakeI010("TXFG6", 22'000'00);
+  decoder.Process(Header('1', '1', 9, basic.size()), basic, emit);
+
+  decoder.Finalize();
+
+  EXPECT_TRUE(decoder.BasicInfoRecords().empty());
+  ASSERT_EQ(decoder.issues().size(), 1);
+  EXPECT_EQ(decoder.issues().front().kind, IssueKind::kMetadataMissing);
+  EXPECT_EQ(decoder.issues().front().symbol, "TXFG6");
+  EXPECT_EQ(decoder.issues().front().transmission_code, '1');
+  EXPECT_EQ(decoder.issues().front().message_kind, '3');
+}
+
+TEST(TaifexMessageDecoderTest, DisablesOnlyOverflowingSymbolAndReportsIssue) {
+  MessageDecoder decoder(20260707);
+  std::vector<DepthRecord> rows;
+  const auto emit = [&](const DepthRecord &record) { rows.push_back(record); };
+  const auto kind = test::MakeI011("TXF", 200.0);
+  decoder.Process(Header('1', '3', 4, kind.size()), kind, emit);
+  for (std::uint64_t sequence = 2;
+       sequence <= protocol::kMaximumCachedEventsPerSymbol + 2; ++sequence) {
+    const auto update = test::MakeI081(
+        "TXFG6", sequence, '0',
+        {.type = '0', .price = 22'000'00, .volume = 5, .level = 1});
+    decoder.Process(Header('2', 'A', 1, update.size()), update, emit);
+  }
+  decoder.Finalize();
+
+  EXPECT_TRUE(rows.empty());
+  EXPECT_EQ(decoder.stats().sequence_gaps, 1);
+  EXPECT_EQ(decoder.stats().unresolved_sequence_gaps, 1);
+  EXPECT_EQ(decoder.stats().gap_cache_overflows, 1);
+  ASSERT_EQ(decoder.issues().size(), 2);
+  EXPECT_EQ(decoder.issues()[0].kind, IssueKind::kSequenceGap);
+  EXPECT_EQ(decoder.issues()[1].kind, IssueKind::kGapCacheOverflow);
+  EXPECT_EQ(decoder.issues()[1].symbol, "TXFG6");
 }
 
 } // namespace

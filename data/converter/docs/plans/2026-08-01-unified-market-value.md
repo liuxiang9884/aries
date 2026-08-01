@@ -5,7 +5,7 @@
 - 将 TWSE 与 TAIFEX 的 `total_value` 统一为包含交易单位乘数的非负累计成交额。
 - 先修改并验证 TWSE converter，再从 `/tw_backup/data/tw/raw/stock/` 的已解压
   dump 优先重建 `/tw_backup/data/tw/csv/stock/` 全部可用交易日。
-- 在已完成的 TAIFEX 同步 converter 上落实相同 value contract、I012 价格变更、
+- 在已完成的 TAIFEX 同步 converter 上落实相同 value contract、I012 协议校验、
   日级/合约级问题摘要和可恢复错误策略，再按相同目录约定后台转换 futures。
 
 ## 非目标
@@ -26,8 +26,8 @@
   symbol、消息类型、sequence 与恢复状态写入日志摘要。frame checksum、截断、非法
   BCD 和错误长度仍使当日失败，但批处理继续下一日。
 - TAIFEX 不再把 gap 质量状态写入每一行 depth CSV；研究前根据日级问题摘要统一审查。
-- I012 按协议更新事件时点之后的 depth `reference_price`，同时记录旧值、新值和时间；
-  basic-info CSV 保留 I010 的盘前值，避免把盘中最终值当作开盘前已知信息。
+- I012 是商品多阶涨跌停价格，不是 reference price 变更。按 V1.5.1 严格解析并
+  统计重复/冲突，但暂不写入固定列 CSV，也不改写 I010 `reference_price`。
 - ignored 消息至少按 transmission/message kind 分项计数，不再只提供总数。
 
 ## 实施步骤

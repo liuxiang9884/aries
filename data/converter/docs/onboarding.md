@@ -17,9 +17,10 @@
   一致；basic-info 输出 40,841 行，SHA-256 为
   `093699608154545fafe40337ad7616c029b3c5ae7ef1277b84cdfd4d349f540a`。
 - `taifex_dump_converter` 已同步解析全部 TAIFEX futures outright 与 spread，
-  输出 45 列 research depth CSV 和 27 列 basic-info CSV；不依赖 SHM。
-- 2026-07-07 真实 TAIFEX dump 已完整校验并生成正式 CSV；读取
-  62,559,197 条消息，输出 54,221,272 条 depth 行与 4,839 条 basic-info 行。
+  输出 44 列 research depth CSV 和 27 列 basic-info CSV；不依赖 SHM。
+- 2026-07-07 真实 TAIFEX dump 已按当前 contract 完成 full dry-run；读取
+  62,559,197 条消息，模拟输出 54,221,272 条 depth 行与 4,839 条 basic-info 行，
+  并解析 181,280 条 I012。
 
 ## 关键入口
 
@@ -42,8 +43,9 @@
 - 非 dry-run 必须提供 depth 与 basic-info 两个不同路径；运行时错误不发布半文件，
   `--overwrite` 下会恢复旧输出。进程崩溃或断电跨两次 rename 不具备文件系统事务保证。
 - 所有有意偏离 Orion 的行为必须记录在对应 exchange 专题文档并有 focused test。
-- TAIFEX 的 `total_value = signed price * contracts * multiplier`；spread 可为负。
-  `continuous_flag=0` 的 history 不能用于要求完整累计 value 的研究。
+- TAIFEX 的 `total_value = abs(price) * contracts * multiplier`，累计值非负。
+- TAIFEX metadata/gap/cache 问题不阻止其余合约发布，必须从每日日志审查 symbol、
+  消息类型、sequence 和恢复状态；当前 depth CSV 不含逐行质量 flag。
 - 当前 TAIFEX 正式 contract 仅支持日盘。夜盘暂不转换，且 CLI 不会自动拒绝夜盘；
   调用方必须保证输入只含日盘。启用夜盘前必须建立交易日历映射并补真实数据回归。
 
@@ -58,12 +60,13 @@ git diff --check
 
 ## 当前主线
 
-TWSE / TPEx 和 TAIFEX converter 均已完成实现与 2026-07-07 真实 dump 回归。
+TWSE / TPEx 和 TAIFEX converter 均已完成实现与 2026-07-07 真实 dump 回归；
+`/tw_backup` 的 stock/future 全量重建由后台任务逐日执行并保留解压 dump。
 
 ## 下一步
 
-继续转换 `/data/tw/raw/future/` 时只处理确认过的日盘输入；夜盘支持明确 deferred。
-下一步先确定 `continuous_flag=0` 数据的下游过滤与研究使用 contract。
+检查 `/home/liuxiang/tmp` 下本轮 stock/future runner 的 summary 与逐日日志，汇总失败
+日期和受影响 symbol；只处理确认过的日盘输入，夜盘支持明确 deferred。
 
 ## 按需阅读
 

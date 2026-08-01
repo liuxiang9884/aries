@@ -88,30 +88,55 @@ struct BookLevel {
 struct Trade {
   std::uint64_t price;
   std::uint64_t volume;
+  char sign{'0'};
 };
 
 inline std::vector<std::uint8_t>
 MakeI024(std::string_view symbol, std::uint64_t sequence, std::uint64_t price,
          std::uint64_t volume, std::uint64_t total_volume,
          std::uint64_t buy_count, std::uint64_t sell_count,
-         char match_flag = '0', std::span<const Trade> extra_trades = {}) {
+         char match_flag = '0', std::span<const Trade> extra_trades = {},
+         char price_sign = '0') {
   std::vector<std::uint8_t> body;
   AppendAscii(body, symbol, 20);
   AppendBcd(body, sequence, 5);
   body.push_back(match_flag);
   AppendBcd(body, 90'000'001'000ULL, 6);
-  body.push_back('0');
+  body.push_back(price_sign);
   AppendBcd(body, price, 5);
   AppendBcd(body, volume, 4);
   body.push_back(static_cast<std::uint8_t>(0x80U | extra_trades.size()));
   for (const auto &trade : extra_trades) {
-    body.push_back('0');
+    body.push_back(trade.sign);
     AppendBcd(body, trade.price, 5);
     AppendBcd(body, trade.volume, 2);
   }
   AppendBcd(body, total_volume, 4);
   AppendBcd(body, buy_count, 4);
   AppendBcd(body, sell_count, 4);
+  return body;
+}
+
+struct PriceLimit {
+  std::uint64_t level;
+  std::uint64_t price;
+};
+
+inline std::vector<std::uint8_t>
+MakeI012(std::string_view symbol, std::span<const PriceLimit> raise_limits,
+         std::span<const PriceLimit> fall_limits) {
+  std::vector<std::uint8_t> body;
+  AppendAscii(body, symbol, 10);
+  AppendBcd(body, raise_limits.size(), 1);
+  for (const auto &limit : raise_limits) {
+    AppendBcd(body, limit.level, 1);
+    AppendBcd(body, limit.price, 5);
+  }
+  AppendBcd(body, fall_limits.size(), 1);
+  for (const auto &limit : fall_limits) {
+    AppendBcd(body, limit.level, 1);
+    AppendBcd(body, limit.price, 5);
+  }
   return body;
 }
 
