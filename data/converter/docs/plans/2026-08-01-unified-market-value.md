@@ -41,6 +41,11 @@
 - format1 `AL/NE` cycle count mismatch 为非致命质量问题。记录 trading day、
   service、control kind、expected/actual 与缺失数量，状态标为
   `success_with_issues`；当天 depth CSV 和 basic-info CSV 都发布。
+- TWSE 采用成对、原子的 best-effort 发布：只要输入中存在能够通过单 frame 校验并
+  成功解析的可信记录，就尽可能同时生成并发布 depth CSV 和 basic-info CSV，不因
+  局部 frame 损坏、cycle mismatch 或个别 symbol 缺少 metadata 放弃整日可用数据。
+  两个文件必须来自同一次转换，禁止只替换其中一个；其中某类没有可输出记录时仍生成
+  只有稳定 header 的对应 CSV，并在 summary 中标记不完整。
 - basic-info CSV 只包含实际成功解析的记录，允许不完整。已有 metadata 的 symbol
   正常转换；若某 symbol 最终仍缺少计算 `total_value` 所需的 multiplier，不伪造
   multiplier/value，跳过该 symbol 的 depth 并记录 symbol 级问题。
@@ -55,10 +60,14 @@
 - `20250925`、`20251014` 的 format6 frame 同时存在 terminal、checksum 和下一
   header 失步。先实现有扫描上限且要求完整 frame 校验的显式 recovery 实验模式，
   重同步到下一条可信 frame，生成 scratch depth/basic CSV；检查受影响 symbol、
-  sequence、volume、`total_value`、列数和全日问题摘要后，再决定是否允许正式发布。
+  sequence、volume、`total_value`、列数和全日问题摘要。验证通过后按 best-effort
+  contract 成对发布两个 CSV，并把跳过的 byte range、frame 和受影响 symbol 记录为
+  `published_partial`；只有无法恢复出任何可信记录时才不发布新文件。
 - 初版 runner 曾把保留的旧 CSV 当作转换成功，导致 `20250909`、`20250911` 被误标
-  success；统一实现时修正 summary，并以 converter exit status 和本次 staged publish
-  结果共同判定成功。
+  success；统一实现时修正 summary，并重新转换、尽可能成对发布两个 CSV。summary
+  必须区分 `published_complete`、`published_partial`、`preserved_previous` 和
+  `not_published`；converter exit status、本次 staged 文件和原子 rename 共同决定本轮
+  发布结果，预先存在的文件只能记为 `preserved_previous`，不能证明本轮成功。
 
 ## 实施步骤
 
