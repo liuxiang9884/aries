@@ -30,6 +30,36 @@
   统计重复/冲突，但暂不写入固定列 CSV，也不改写 I010 `reference_price`。
 - ignored 消息至少按 transmission/message kind 分项计数，不再只提供总数。
 
+## TWSE 批量问题处理决定
+
+以下是 2026-08-01 全量重建暴露问题后的处理 contract。当前先记录决定，待股票
+问题全部讨论完成后统一实现、测试和重跑；不要把本节误读为当前 converter 已具备的
+行为。
+
+已锁定：
+
+- format1 `AL/NE` cycle count mismatch 为非致命质量问题。记录 trading day、
+  service、control kind、expected/actual 与缺失数量，状态标为
+  `success_with_issues`；当天 depth CSV 和 basic-info CSV 都发布。
+- basic-info CSV 只包含实际成功解析的记录，允许不完整。已有 metadata 的 symbol
+  正常转换；若某 symbol 最终仍缺少计算 `total_value` 所需的 multiplier，不伪造
+  multiplier/value，跳过该 symbol 的 depth 并记录 symbol 级问题。
+- 无法通过 `gzip -t` 或无法解压的归档标为 `input_corrupt`，不生成或覆盖 CSV，
+  保留归档与日志并加入重新下载清单；批处理继续下一日。
+- 可正常解压但 member 为零字节时，先按交易日历分类：休市日标为
+  `non_trading_day` 并正常结束、不生成 CSV；正常交易日标为 `empty_input`，不生成
+  CSV并加入重新下载清单。
+
+待真实数据验证后锁定：
+
+- `20250925`、`20251014` 的 format6 frame 同时存在 terminal、checksum 和下一
+  header 失步。先实现有扫描上限且要求完整 frame 校验的显式 recovery 实验模式，
+  重同步到下一条可信 frame，生成 scratch depth/basic CSV；检查受影响 symbol、
+  sequence、volume、`total_value`、列数和全日问题摘要后，再决定是否允许正式发布。
+- 初版 runner 曾把保留的旧 CSV 当作转换成功，导致 `20250909`、`20250911` 被误标
+  success；统一实现时修正 summary，并以 converter exit status 和本次 staged publish
+  结果共同判定成功。
+
 ## 实施步骤
 
 1. 为 TWSE 一般交易 multiplier 和 odd-lot 有效乘数补失败测试。
