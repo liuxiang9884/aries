@@ -366,4 +366,5 @@ source_message,source_sequence,sequence
   数据回归仍需其他日期或采集源。
 - 当前仓库尚未建立 generation manifest/schema version；`local_ns` fallback 仍只在文档
   层说明。
-- 本文不设计 TAIFEX Orderbook 字段；期货专属 review 另立事实源。
+- TAIFEX 期货专属字段不在本文定义；对应事实源为
+  `data/converter/docs/taifex_orderbook_trade.md`。

@@ -28,6 +28,10 @@
 - 2026-07-07 真实 TAIFEX dump 已按当前 contract 完成 full dry-run；读取
   61,605,862 条日盘消息，模拟输出 54,086,067 条 orderbook 行与 4,839 条 basic-info 行，
   并解析 154,880 条 I012。
+- 股票与期货专属的下一版 Orderbook / Trade 字段审查均已形成设计专题，但尚未修改
+  当前 records、CSV schema 或历史输出。期货设计明确 I024 一项一条 Trade、
+  `MATCH-TIME` / `INFORMATION-TIME` 分离、actual/trial book 分离，以及普通/
+  derived/statistics 分表。
 
 ## 关键入口
 
@@ -39,6 +43,8 @@
 - 协议与 Orion 差异：`data/converter/docs/twse.md`
 - TWSE / TPEx 股票 Orderbook 字段设计：`data/converter/docs/twse_orderbook.md`
 - TAIFEX schema、恢复语义与 Orion 差异：`data/converter/docs/taifex.md`
+- TAIFEX Futures Orderbook / Trade 字段设计：
+  `data/converter/docs/taifex_orderbook_trade.md`
 - 验证命令：`data/converter/docs/testing.md`
 
 ## 重要边界 / Contract
@@ -48,9 +54,10 @@
   `Orderbook<5>`，但股票与期货保持独立 struct，不建立公共数据基类或字段并集。
   交易所原始协议中的 `Depth` 名称保持不变。
 - 本次 writer 迁移不改变两套 `Orderbook<5>`、basic-info record、列顺序、字段语义或
-  数值格式。股票正式 Orderbook / Trade 字段建议已写入
-  `data/converter/docs/twse_orderbook.md`，尚未实现，后续必须作为独立 schema/version
-  迁移。
+  数值格式。股票与期货正式 Orderbook / Trade 字段建议分别写入
+  `data/converter/docs/twse_orderbook.md` 和
+  `data/converter/docs/taifex_orderbook_trade.md`，均尚未实现，后续必须作为独立
+  schema/version 迁移。
 - 当前 23 列 CSV 是 Orion legacy compatibility contract，不直接升级为正式研究 schema。
 - basic-info CSV 的主键、列顺序、空值、单位和 format1 重复处理以
   `data/converter/docs/twse.md` 为事实源；Big5/CP950 名称不解析、不输出。
@@ -98,6 +105,8 @@ TWSE / TPEx 和 TAIFEX converter 均已完成主体实现与真实 dump 回归�
 
 - TWSE / TPEx 协议与已知边界：`data/converter/docs/twse.md`
 - TAIFEX 协议、schema 与已知边界：`data/converter/docs/taifex.md`
+- TAIFEX 下一版 Orderbook / Trade 字段建议：
+  `data/converter/docs/taifex_orderbook_trade.md`
 - focused 与完整 dump 验证：`data/converter/docs/testing.md`
 - 数据路径与发布结果：`data/docs/data.md`
 - 已完成计划：`data/converter/docs/plans/`

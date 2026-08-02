@@ -1,6 +1,11 @@
 # TAIFEX Futures Dump Converter 设计与验证
 
-更新时间：2026-08-01
+更新时间：2026-08-02
+
+TAIFEX futures 专属 `Orderbook<N>` 的逐字段审查、actual/trial book 分离、I024
+multi-item/continuation `Trade` 设计和分表建议见
+`data/converter/docs/taifex_orderbook_trade.md`。该专题是尚未实施的下一版 schema 建议；
+本文件继续描述当前 44/27 列 converter contract。
 
 ## 范围与事实源
 
