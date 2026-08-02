@@ -37,6 +37,7 @@
 - 测试：`tests/data/converter/twse/`
 - TAIFEX 测试：`tests/data/converter/taifex/`
 - 协议与 Orion 差异：`data/converter/docs/twse.md`
+- TWSE / TPEx 股票 Orderbook 字段设计：`data/converter/docs/twse_orderbook.md`
 - TAIFEX schema、恢复语义与 Orion 差异：`data/converter/docs/taifex.md`
 - 验证命令：`data/converter/docs/testing.md`
 
@@ -44,9 +45,12 @@
 
 - converter 的归一化盘口对象统一命名为各 exchange namespace 下的
   `Orderbook<N>`，`N` 决定 bid/ask 档位数组长度；当前 TWSE 与 TAIFEX 均显式使用
-  `Orderbook<5>`。交易所原始协议中的 `Depth` 名称保持不变。
+  `Orderbook<5>`，但股票与期货保持独立 struct，不建立公共数据基类或字段并集。
+  交易所原始协议中的 `Depth` 名称保持不变。
 - 本次 writer 迁移不改变两套 `Orderbook<5>`、basic-info record、列顺序、字段语义或
-  数值格式；统一 Orderbook/Trade schema 仍是后续独立迁移。
+  数值格式。股票正式 Orderbook / Trade 字段建议已写入
+  `data/converter/docs/twse_orderbook.md`，尚未实现，后续必须作为独立 schema/version
+  迁移。
 - 当前 23 列 CSV 是 Orion legacy compatibility contract，不直接升级为正式研究 schema。
 - basic-info CSV 的主键、列顺序、空值、单位和 format1 重复处理以
   `data/converter/docs/twse.md` 为事实源；Big5/CP950 名称不解析、不输出。

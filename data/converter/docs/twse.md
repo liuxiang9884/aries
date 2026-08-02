@@ -16,6 +16,11 @@
 dump 到 CSV 的独立工具，不提取 Orion 的 multicast、replay、SHM、symbol
 pool 或 binary data file 路径。
 
+股票专属 `Orderbook<N>` 的逐字段审查、typed status、actual/trial、trade-only、
+五档 volume、OHLC 和独立 `Trade` 建议见 `data/converter/docs/twse_orderbook.md`。
+该文档描述尚未实现的下一版研究 schema；本文仍是当前 converter 行为与 23/30 列
+CSV contract 的事实源。
+
 ## 协议核对结果
 
 两份交易所文档对 format 6、17、22、23 定义相同的 wire layout，市场由
