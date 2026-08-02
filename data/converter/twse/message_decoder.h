@@ -9,7 +9,7 @@
 #include <unordered_set>
 
 #include "data/converter/twse/basic_info.h"
-#include "data/converter/twse/depth_record.h"
+#include "data/converter/twse/orderbook.h"
 #include "data/converter/twse/protocol.h"
 
 namespace aries::data::twse {
@@ -38,17 +38,32 @@ class MessageDecoder {
 public:
   MessageDecoder(std::int32_t trading_day, SymbolFilterMode mode);
 
-  [[nodiscard]] const DepthRecord *Process(const MessageHeader &header,
-                                           std::span<const std::uint8_t> body);
+  [[nodiscard]] const Orderbook<5> *Process(const MessageHeader &header,
+                                            std::span<const std::uint8_t> body);
 
   void ApplyBasicInfo(const BasicInfoRecord &basic_info);
+
+  void InvalidateSymbol(std::string symbol);
 
   [[nodiscard]] std::size_t symbol_count() const noexcept {
     return records_.size();
   }
 
+  [[nodiscard]] std::uint64_t missing_multiplier_messages() const noexcept {
+    return missing_multiplier_messages_;
+  }
+
+  [[nodiscard]] std::uint64_t invalidated_symbol_messages() const noexcept {
+    return invalidated_symbol_messages_;
+  }
+
+  [[nodiscard]] const std::unordered_set<std::string> &
+  missing_multiplier_symbols() const noexcept {
+    return missing_multiplier_symbols_;
+  }
+
 private:
-  [[nodiscard]] DepthRecord *
+  [[nodiscard]] Orderbook<5> *
   FindOrCreate(std::span<const std::uint8_t> exchange_symbol);
 
   void ProcessBasicInfo(const MessageHeader &header,
@@ -56,15 +71,19 @@ private:
 
   void ProcessOddLotBasicInfo(std::span<const std::uint8_t> body);
 
-  [[nodiscard]] const DepthRecord *
+  [[nodiscard]] const Orderbook<5> *
   ProcessDepth(const MessageHeader &header, std::span<const std::uint8_t> body,
                bool odd_lot, bool emit);
 
   std::int64_t trading_day_start_ns_;
   std::int32_t trading_day_;
   SymbolFilterMode mode_;
-  std::unordered_map<std::string, DepthRecord> records_;
+  std::unordered_map<std::string, Orderbook<5>> records_;
   std::unordered_set<std::string> warrant_symbols_;
+  std::unordered_set<std::string> invalidated_symbols_;
+  std::unordered_set<std::string> missing_multiplier_symbols_;
+  std::uint64_t missing_multiplier_messages_{};
+  std::uint64_t invalidated_symbol_messages_{};
 };
 
 } // namespace aries::data::twse

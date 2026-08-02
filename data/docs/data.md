@@ -1,14 +1,13 @@
 # 数据说明
 
-更新时间：2026-07-31T17:51:13+08:00
+更新时间：2026-08-01
 
 ## 当前范围
 
-当前已有工作集中在台湾 raw 行情下载、本地落盘、TWSE dump converter，
-以及 2026-07-07 dump 到 CSV 的兼容性验证。仓库尚未建立正式版本化 schema、
-manifest、分区格式或通用质量检查报告；当前 converter 生成 Orion-compatible
-depth CSV 和 format1 basic-info CSV，仍不能替代版本化的完整行情研究数据
-contract。
+当前已有工作集中在台湾 raw 行情下载、本地落盘、TWSE / TAIFEX dump converter，
+以及 2026-07-07 真实数据验证。TWSE 当前生成 23 列 orderbook 与 format1 basic-info；
+TAIFEX 生成全 futures research orderbook/basic-info。仓库尚未建立跨市场统一的 schema
+version、manifest、分区格式、夜盘交易日历或通用质量报告。
 
 ## NAS Raw 下载
 
@@ -83,7 +82,7 @@ tests/data/converter/twse/
 
 | format | 含义 | 处理方式 |
 |---:|---|---|
-| 1 | stock basic info | 更新 depth 状态，并进入去重后的 basic-info CSV |
+| 1 | stock basic info | 更新 orderbook 状态，并进入去重后的 basic-info CSV |
 | 6 | stock depth | 更新五档与成交状态；按 mode 决定是否输出 |
 | 17 | warrant depth | 复用标准 depth 解码；`warrant` mode 输出 |
 | 22 | odd-lot basic info | `odd_lot` mode 更新基础状态 |
@@ -109,7 +108,7 @@ format 6 末尾 symbol 为 `000000`、时间为 `999999999999` 的结束控制�
 | `odd_lot` | format 23 |
 | `all` | format 6 的全部非控制 symbol |
 
-depth CSV 固定为以下 23 列：
+orderbook CSV 固定为以下 23 列：
 
 ```text
 symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,
@@ -127,10 +126,11 @@ format1 另生成 30 列 basic-info CSV，主键和排序键为
 - `trading_day` 按 UTC+8 自然日零点计算，不依赖进程时区；消息中的 BCD
   `HHMMSSmmmuuu` 是当日偏移。
 - offline `symbol_id` 固定为 `-1`，`localtime` 等于 `exchtime`。
-- price 和 `total_value` 使用两位小数；五档 volume 参与内部状态更新，但
-  Orion legacy CSV 不包含对应列。
-- 每个 symbol 跨消息保存 high / low limit、open、last、累计 volume 和
-  Orion 当前增量口径的 `total_value`。
+- price 和 `total_value` 使用两位小数；五档 volume 参与内部状态更新，但当前
+  23 列 CSV 不包含对应列。
+- 每个 symbol 跨消息保存 high / low limit、open、last 和累计 volume。一般交易
+  的 `total_value` 累计 `delta_volume * last_price * multiplier`，单位为
+  basic-info `currency`；odd-lot 的有效乘数为 1。
 - 非法 service / format version / BCD / message length / checksum、截断、
   非法 trailer 或超过五档会终止转换。
 - 非 dry-run 必须指定不同的 `--output` 与 `--basic-output`。两份 CSV 都先写
@@ -139,6 +139,9 @@ format1 另生成 30 列 basic-info CSV，主键和排序键为
   进程崩溃 / 断电不具备文件系统事务保证。
 
 ## 2026-07-07 Dump 转 CSV
+
+本节先保留 Orion legacy 基准，再记录 Aries converter 的独立结果。两种 TAIFEX
+输出的资产池、schema 和 value 口径不同，不能直接按 bytes 比较。
 
 输入 dump：
 
@@ -198,8 +201,8 @@ cd /home/liuxiang/dev/orion
   `1783384200073709000` 至 `1783402380000000000`。
 - 两份文件发布后重新计算 SHA-256，结果见上表。
 
-Aries converter 使用相同 stock dump 和 `trading_day = 20260707` 做完整
-转换：
+以下是 2026-08-01 修改 `total_value` multiplier contract 前的历史兼容性验证。
+当时 Aries converter 使用相同 stock dump 和 `trading_day = 20260707` 做完整转换：
 
 ```bash
 ./build/release/data/converter/twse_dump_converter \
@@ -210,13 +213,14 @@ Aries converter 使用相同 stock dump 和 `trading_day = 20260707` 做完整
   --symbol-filter-mode stock
 ```
 
-读取 25,993,761 条 message、输出 15,886,026 条 depth 数据行、维护 1,979 个
-depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正式输出均为
+读取 25,993,761 条 message、输出 15,886,026 条 orderbook 数据行、维护 1,979 个
+orderbook symbol，共读取 3,153,093,917 bytes。Aries orderbook 输出与 Orion 正式输出均为
 2,742,684,274 bytes，SHA-256 均为
 `f5981991517c24d07fbe4ee2ef38d9b9d3d198b69d2c841cdab39d5a8cb3cc41`，
-`cmp` 返回 0。完整 dump 的其余四种 filter mode 也已通过 dry-run；该 dump
-没有可供 `odd_lot` format23 / `warrant` format17 depth 输出的真实消息，
-因此这两种 depth 输出路径仍以 synthetic fixture 为验证证据。
+`cmp` 返回 0。新 contract 不再以该 orderbook hash 或 `cmp` 为完成条件。完整 dump 的
+其余四种 filter mode 也已通过 dry-run；该 dump
+没有可供 `odd_lot` format23 / `warrant` format17 orderbook 输出的真实消息，
+因此这两种 orderbook 输出路径仍以 synthetic fixture 为验证证据。
 
 同次转换读取 1,145,472 条 format1 正常记录和 167 条控制记录；去除
 1,104,631 条完全相同的重复后，basic-info 得到 40,841 个唯一主键，未发现
@@ -231,11 +235,81 @@ depth symbol，共读取 3,153,093,917 bytes。Aries depth 输出与 Orion 正�
 /home/liuxiang/tmp/aries-twse-basic-verify.w0V22Y/twse_basic_info_20260707.csv
 ```
 
+### Aries TAIFEX 全 Futures 输出
+
+输入使用：
+
+```text
+/data/tw/raw/future/taifex_20260707.dump.tar.gz
+/tw_backup/data/tw/raw/future/taifex_20260707.dump
+```
+
+归档为 1,213,053,544 bytes，唯一 member 解压后为 6,005,844,926 bytes。解压文件
+保留在 `/tw_backup/data/tw/raw/future/`；原始压缩包也保留不变。
+
+当前 44 列/non-negative value contract 的完整 dry-run：
+
+```bash
+./build/release/data/converter/taifex_dump_converter \
+  --dump /tw_backup/data/tw/raw/future/taifex_20260707.dump \
+  --trading-day 20260707 \
+  --dry-run
+```
+
+converter 在第一条 `13:46:00` 消息前读取 61,605,862 条消息，模拟输出
+54,086,067 条 orderbook 数据行；处理 154,801 条 I010、56,403 条 I011 与 154,880 条
+I012。I010/I011 一致重复为 209,085 条，I012 一致重复为 153,120 条、冲突为 0，
+basic-info 为 4,839 条。
+9 条 realtime 在 metadata 前到达；4 个 product sequence gap 全部恢复，没有 stale、
+截止前没有未恢复 gap 或 cache overflow。ignored 总数为 2,260,130，并按
+transmission/message kind 分项记录。
+
+metadata-before-basic 涉及 `TJFH6/L6`、`TJFL6`、`TJFG6`；gap 涉及
+`TJFG6`、`TJFL6`、`TJFH6`、`TJFH6/L6`。日盘 dry-run 在 offset
+`5,640,462,381` 命中截止并成功，wall time 10.84 秒，最大 RSS 270,456 KiB。
+
+下表是 2026-08-01 schema/value 修改前的历史 Aries 输出，不是当前 44 列、
+`abs(price) * volume * multiplier` contract 的 hash 基线：
+
+| 输出 | bytes | 数据行 | 列数 | SHA-256 |
+|---|---:|---:|---:|---|
+| `/data/tw/csv/future/taifex_20260707_future.csv` | 18,034,209,936 | 54,221,272 | 45 | `5dd579b47fd1b0ee803c076d36cef58e14631741c9672051283ca16a228688f1` |
+| `/data/tw/csv/future/taifex_20260707_future_basic_info.csv` | 487,542 | 4,839 | 27 | `200f3c86d6f788a99f23d733f4ccdd28c91044085963c4d4c32b9ea0b6094577` |
+
+历史输出的独立全文件检查确认 orderbook 每行 45 列、2,923 个有 orderbook 的 symbol 内 sequence
+严格递增，identity/time/volume/flag/high-low 约束无异常；basic-info 每行 27 列、
+symbol 排序且唯一、multiplier 全部大于 0。43,388 行包含负 signed price/value，
+全部来自 calendar spread。发生 gap 的 4 个 symbol 共 441,094 行持续标记
+`continuous_flag=0`，防止下游把无法完整重建的累计 `total_value` 当作完整 history。
+
+当前全量任务会把 44/27 列结果写入 `/tw_backup/data/tw/csv/future/`；每个交易日
+独立记录 success/failure 和 symbol 级问题，完成后再建立当前 contract 的 manifest
+与 hash 基线。TAIFEX schema、multiplier/value 口径、恢复语义、Orion 差异和夜盘边界见
+`data/converter/docs/taifex.md`。
+
+TWSE 历史重建采用 `data/converter/scripts/rebuild_twse_csv`，raw dump 保留在
+`/tw_backup/data/tw/raw/stock/`，CSV 成对写入 `/tw_backup/data/tw/csv/stock/`。
+2026-08-01 已验证并发布三个旧失败日：
+
+| 日期 | publication | orderbook 行 | basic-info 行 | 问题 |
+|---|---|---:|---:|---|
+| 2025-09-09 | `published_partial` | 8,861,899 | 45,380 | 3 个 format1 cycle mismatch |
+| 2025-09-25 | `published_partial` | 4,075,957 | 45,657 | offset `797405152` 跳过 32 bytes；`2603` 后续隔离 |
+| 2025-10-14 | `published_partial` | 2,541,590 | 45,790 | offset `554258381` 跳过 51 bytes；`1256` 后续隔离 |
+
+三天 orderbook 全文件检查均为 23 列、`total_value` 非负且按 symbol 不回退；basic-info
+均为 30 列、主键无重复且 multiplier 全部大于 0。局部损坏后的受影响 symbol 不再
+输出，因此该 symbol 的当日文件只包含损坏前的可信前缀；研究时必须结合逐日日志和
+publication status 使用。
+
 ## 未完成事项
 
 - 为 raw、dump、csv、后续 parquet / binary 研究数据确定统一目录约定，避免 `/data/tw/raw` 与 `/home/liuxiang/data/raw` 长期并存而语义不清。
 - 建立数据 manifest：数据类型、交易日、来源、远端路径、本地路径、大小、hash、生成命令、生成时间和质量检查状态。
-- 提取 TAIFEX dump converter，并以相同方式建立小样本 fixture、失败边界和
-  2026-07-07 完整文件兼容性证据。
+- TAIFEX 当前只允许正式转换统一日盘窗口；reader 在第一条 `13:46:00` 消息处停止。
+  夜盘支持 deferred；未来启用前必须建立交易日到
+  事件自然日的交易日历映射，并补真实夜盘回归和 timestamp 一致性检查。
+- 为 TAIFEX/TWSE 输出建立 manifest 与明确 schema version，记录输入 hash、工具
+  commit、输出 hash、质量统计和交易日/symbol 问题摘要。
 - 为 TWSE 设计包含 bid / ask volume 的正式版本化 schema；在 contract、
-  manifest 和迁移规则锁定前，不把 legacy CSV 当作正式研究数据集。
+  manifest 和迁移规则锁定前，不把当前 23 列 CSV 当作正式研究数据集。

@@ -42,3 +42,26 @@ target_link_libraries(
 )
 
 gtest_discover_tests(twse_converter_tests)
+
+add_executable(
+    taifex_converter_tests
+    data/converter/taifex/bcd_decoder_test.cpp
+    data/converter/taifex/dump_converter_test.cpp
+    data/converter/taifex/message_decoder_test.cpp
+)
+
+target_include_directories(
+    taifex_converter_tests
+    PRIVATE
+        "${PROJECT_SOURCE_DIR}"
+)
+
+target_link_libraries(
+    taifex_converter_tests
+    PRIVATE
+        aries::project_options
+        aries_taifex_converter
+        GTest::gtest_main
+)
+
+gtest_discover_tests(taifex_converter_tests)

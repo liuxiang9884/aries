@@ -19,7 +19,7 @@
 namespace aries::data::twse {
 namespace {
 
-constexpr std::string_view kLegacyHeader =
+constexpr std::string_view kOrderbookHeader =
     "symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,"
     "ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,"
     "ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,"
@@ -193,11 +193,11 @@ void Rename(const std::filesystem::path &from, const std::filesystem::path &to,
 
 } // namespace
 
-struct LegacyCsvWriter::Impl {
+struct OrderbookCsvWriter::Impl {
   Impl(const std::filesystem::path &output_path, bool overwrite)
-      : file(output_path, overwrite, kLegacyHeader) {}
+      : file(output_path, overwrite, kOrderbookHeader) {}
 
-  void Write(const DepthRecord &record) {
+  void Write(const Orderbook<5> &record) {
     row_buffer.clear();
     fmt::format_to(
         std::back_inserter(row_buffer),
@@ -252,16 +252,19 @@ struct BasicInfoCsvWriter::Impl {
   fmt::memory_buffer row_buffer;
 };
 
-LegacyCsvWriter::LegacyCsvWriter(const std::filesystem::path &output_path,
-                                 bool overwrite)
+OrderbookCsvWriter::OrderbookCsvWriter(const std::filesystem::path &output_path,
+                                       bool overwrite)
     : impl_(std::make_unique<Impl>(output_path, overwrite)) {}
 
-LegacyCsvWriter::~LegacyCsvWriter() = default;
-LegacyCsvWriter::LegacyCsvWriter(LegacyCsvWriter &&) noexcept = default;
-LegacyCsvWriter &
-LegacyCsvWriter::operator=(LegacyCsvWriter &&) noexcept = default;
+OrderbookCsvWriter::~OrderbookCsvWriter() = default;
+OrderbookCsvWriter::OrderbookCsvWriter(OrderbookCsvWriter &&) noexcept =
+    default;
+OrderbookCsvWriter &
+OrderbookCsvWriter::operator=(OrderbookCsvWriter &&) noexcept = default;
 
-void LegacyCsvWriter::Write(const DepthRecord &record) { impl_->Write(record); }
+void OrderbookCsvWriter::Write(const Orderbook<5> &record) {
+  impl_->Write(record);
+}
 
 BasicInfoCsvWriter::BasicInfoCsvWriter(const std::filesystem::path &output_path,
                                        bool overwrite)
@@ -277,10 +280,10 @@ void BasicInfoCsvWriter::Write(const BasicInfoRecord &record) {
   impl_->Write(record);
 }
 
-void CsvOutputTransaction::Commit(LegacyCsvWriter &depth_writer,
+void CsvOutputTransaction::Commit(OrderbookCsvWriter &orderbook_writer,
                                   BasicInfoCsvWriter &basic_info_writer) {
   std::array<PublishState, 2> states{{
-      {.file = &depth_writer.impl_->file,
+      {.file = &orderbook_writer.impl_->file,
        .backup_path = {},
        .backed_up = false,
        .published = false},
@@ -290,7 +293,7 @@ void CsvOutputTransaction::Commit(LegacyCsvWriter &depth_writer,
        .published = false},
   }};
   if (states[0].file->output_path() == states[1].file->output_path()) {
-    throw std::invalid_argument("depth and basic-info outputs must differ");
+    throw std::invalid_argument("orderbook and basic-info outputs must differ");
   }
 
   for (auto &state : states) {

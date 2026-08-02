@@ -224,8 +224,9 @@ MessageDecoder::MessageDecoder(std::int32_t trading_day, SymbolFilterMode mode)
     : trading_day_start_ns_(TradingDayStartNanoseconds(trading_day)),
       trading_day_(trading_day), mode_(mode) {}
 
-const DepthRecord *MessageDecoder::Process(const MessageHeader &header,
-                                           std::span<const std::uint8_t> body) {
+const Orderbook<5> *
+MessageDecoder::Process(const MessageHeader &header,
+                        std::span<const std::uint8_t> body) {
   if (header.message_length != protocol::kHeaderSize + body.size()) {
     throw std::runtime_error("TWSE header and body lengths do not match");
   }
@@ -261,7 +262,7 @@ const DepthRecord *MessageDecoder::Process(const MessageHeader &header,
   }
 }
 
-DepthRecord *
+Orderbook<5> *
 MessageDecoder::FindOrCreate(std::span<const std::uint8_t> exchange_symbol) {
   const std::string_view raw_symbol(
       reinterpret_cast<const char *>(exchange_symbol.data()),
@@ -307,6 +308,18 @@ void MessageDecoder::ApplyBasicInfo(const BasicInfoRecord &basic_info) {
   record->previous_close = basic_info.reference_price;
   record->high_limit = basic_info.high_limit;
   record->low_limit = basic_info.low_limit;
+  if (basic_info.multiplier == 0) {
+    missing_multiplier_symbols_.insert(record->symbol);
+    invalidated_symbols_.insert(record->symbol);
+    return;
+  }
+  record->multiplier = basic_info.multiplier;
+}
+
+void MessageDecoder::InvalidateSymbol(std::string symbol) {
+  if (!symbol.empty()) {
+    invalidated_symbols_.insert(std::move(symbol));
+  }
 }
 
 void MessageDecoder::ProcessOddLotBasicInfo(
@@ -326,7 +339,7 @@ void MessageDecoder::ProcessOddLotBasicInfo(
       DecodePrice(body.subspan(protocol::kOddLotLowLimitOffset, 5));
 }
 
-const DepthRecord *
+const Orderbook<5> *
 MessageDecoder::ProcessDepth(const MessageHeader &header,
                              std::span<const std::uint8_t> body, bool odd_lot,
                              bool emit) {
@@ -360,6 +373,24 @@ MessageDecoder::ProcessDepth(const MessageHeader &header,
     return nullptr;
   }
 
+  if (invalidated_symbols_.contains(record->symbol)) {
+    ++invalidated_symbol_messages_;
+    return nullptr;
+  }
+
+  const auto total_volume_offset = odd_lot ? protocol::kOddLotTotalVolumeOffset
+                                           : protocol::kStockTotalVolumeOffset;
+  const auto total_volume = static_cast<std::int64_t>(
+      DecodeBcdInteger(body.subspan(total_volume_offset, volume_size)));
+  if (!odd_lot && record->multiplier == 0) {
+    missing_multiplier_symbols_.insert(record->symbol);
+    ++missing_multiplier_messages_;
+    if (total_volume != 0) {
+      invalidated_symbols_.insert(record->symbol);
+    }
+    return nullptr;
+  }
+
   record->exchtime =
       trading_day_start_ns_ +
       DecodeBcdTimeNanoseconds(body.subspan(protocol::kDepthTimeOffset, 6));
@@ -388,13 +419,11 @@ MessageDecoder::ProcessDepth(const MessageHeader &header,
     record->total_trade = 0;
   }
 
-  const auto total_volume_offset = odd_lot ? protocol::kOddLotTotalVolumeOffset
-                                           : protocol::kStockTotalVolumeOffset;
-  const auto total_volume = static_cast<std::int64_t>(
-      DecodeBcdInteger(body.subspan(total_volume_offset, volume_size)));
+  const auto effective_multiplier =
+      odd_lot ? std::uint64_t{1} : record->multiplier;
   record->total_value +=
       static_cast<double>(total_volume - record->total_volume) *
-      record->last_price;
+      record->last_price * static_cast<double>(effective_multiplier);
   record->total_volume = total_volume;
 
   if (record->open == 0.0 && record->total_volume != 0) {

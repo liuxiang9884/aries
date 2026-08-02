@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "nova/utils/log.h"
@@ -21,7 +22,7 @@ int main(int argc, char **argv) {
   } logging_guard;
 
   CLI::App app{
-      "Convert a TWSE multicast dump to depth and basic-info CSV files"};
+      "Convert a TWSE multicast dump to orderbook and basic-info CSV files"};
   std::filesystem::path dump_path;
   std::filesystem::path output_path;
   std::filesystem::path basic_output_path;
@@ -75,13 +76,64 @@ int main(int argc, char **argv) {
             .dry_run = dry_run,
             .overwrite = overwrite,
         });
-    NOVA_INFO("TWSE conversion complete: mode={} messages={} depth_rows={} "
-              "depth_symbols={} basic_messages={} basic_controls={} "
-              "basic_duplicates={} basic_rows={} bytes={} dry_run={}",
-              aries::data::twse::ToString(mode), stats.messages_read,
-              stats.rows_written, stats.symbols_seen, stats.basic_info_messages,
-              stats.basic_info_controls, stats.basic_info_duplicates,
-              stats.basic_info_rows, stats.bytes_read, dry_run);
+    for (const auto &issue : stats.basic_info_cycle_mismatches) {
+      NOVA_WARNING(
+          "TWSE conversion issue: kind=format1_cycle_mismatch "
+          "trading_day={} service={} control={} expected={} actual={} "
+          "missing={} offset={} sequence={}",
+          trading_day, static_cast<unsigned>(issue.service_type),
+          issue.control_kind == aries::data::twse::BasicInfoControlKind::kAll
+              ? "AL"
+              : "NE",
+          issue.expected, issue.actual,
+          issue.expected > issue.actual ? issue.expected - issue.actual : 0,
+          issue.offset, issue.sequence);
+    }
+    for (const auto &issue : stats.frame_recovery_issues) {
+      NOVA_WARNING(
+          "TWSE conversion issue: kind=frame_corruption trading_day={} "
+          "offset={} skipped_bytes={} recovered_offset={} service={} "
+          "format={} version={} sequence={} affected_symbol={} "
+          "error={}",
+          trading_day, issue.offset, issue.skipped_bytes,
+          issue.recovered_offset.has_value()
+              ? std::to_string(*issue.recovered_offset)
+              : "none",
+          issue.service_type.has_value() ? std::to_string(*issue.service_type)
+                                         : "unknown",
+          issue.message_type.has_value() ? std::to_string(*issue.message_type)
+                                         : "unknown",
+          issue.format_version.has_value()
+              ? std::to_string(*issue.format_version)
+              : "unknown",
+          issue.sequence.has_value() ? std::to_string(*issue.sequence)
+                                     : "unknown",
+          issue.affected_symbol.value_or("unknown"), issue.error);
+    }
+    for (const auto &symbol : stats.missing_multiplier_symbols) {
+      NOVA_WARNING("TWSE conversion issue: kind=missing_multiplier "
+                   "trading_day={} symbol={}",
+                   trading_day, symbol);
+    }
+    const std::string_view result_status =
+        dry_run
+            ? (stats.has_issues() ? std::string_view{"validated_with_issues"}
+                                  : std::string_view{"validated"})
+            : (stats.has_issues() ? std::string_view{"published_partial"}
+                                  : std::string_view{"published_complete"});
+    NOVA_INFO(
+        "TWSE conversion complete: status={} mode={} messages={} "
+        "orderbook_rows={} "
+        "orderbook_symbols={} basic_messages={} basic_controls={} "
+        "basic_duplicates={} basic_rows={} cycle_mismatches={} "
+        "frame_errors={} missing_multiplier_messages={} "
+        "invalidated_symbol_messages={} bytes={} dry_run={}",
+        result_status, aries::data::twse::ToString(mode), stats.messages_read,
+        stats.rows_written, stats.symbols_seen, stats.basic_info_messages,
+        stats.basic_info_controls, stats.basic_info_duplicates,
+        stats.basic_info_rows, stats.basic_info_cycle_mismatches.size(),
+        stats.frame_recovery_issues.size(), stats.missing_multiplier_messages,
+        stats.invalidated_symbol_messages, stats.bytes_read, dry_run);
     return 0;
   } catch (const std::exception &error) {
     NOVA_ERROR("TWSE conversion failed: {}", error.what());

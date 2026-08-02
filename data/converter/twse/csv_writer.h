@@ -4,21 +4,21 @@
 #include <memory>
 
 #include "data/converter/twse/basic_info.h"
-#include "data/converter/twse/depth_record.h"
+#include "data/converter/twse/orderbook.h"
 
 namespace aries::data::twse {
 
-class LegacyCsvWriter {
+class OrderbookCsvWriter {
 public:
-  LegacyCsvWriter(const std::filesystem::path &output_path, bool overwrite);
-  ~LegacyCsvWriter();
+  OrderbookCsvWriter(const std::filesystem::path &output_path, bool overwrite);
+  ~OrderbookCsvWriter();
 
-  LegacyCsvWriter(const LegacyCsvWriter &) = delete;
-  LegacyCsvWriter &operator=(const LegacyCsvWriter &) = delete;
-  LegacyCsvWriter(LegacyCsvWriter &&) noexcept;
-  LegacyCsvWriter &operator=(LegacyCsvWriter &&) noexcept;
+  OrderbookCsvWriter(const OrderbookCsvWriter &) = delete;
+  OrderbookCsvWriter &operator=(const OrderbookCsvWriter &) = delete;
+  OrderbookCsvWriter(OrderbookCsvWriter &&) noexcept;
+  OrderbookCsvWriter &operator=(OrderbookCsvWriter &&) noexcept;
 
-  void Write(const DepthRecord &record);
+  void Write(const Orderbook<5> &record);
 
 private:
   friend class CsvOutputTransaction;
@@ -46,7 +46,7 @@ private:
 
 class CsvOutputTransaction {
 public:
-  static void Commit(LegacyCsvWriter &depth_writer,
+  static void Commit(OrderbookCsvWriter &orderbook_writer,
                      BasicInfoCsvWriter &basic_info_writer);
 };
 
