@@ -1,43 +1,55 @@
 #include "data/converter/taifex/csv_writer.h"
 
+#include <unistd.h>
+
 #include <array>
 #include <cerrno>
 #include <cstdio>
-#include <fstream>
-#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
-#include <vector>
-
-#include <unistd.h>
 
 #include <fmt/format.h>
+#include <quill/CsvWriter.h>
+
+#include "nova/utils/log.h"
 
 namespace aries::data::taifex {
 namespace {
 
-constexpr std::string_view kOrderbookHeader =
-    "trading_day,market,symbol,symbol_id,exchtime,localtime,reference_price,"
-    "open,high,low,last_price,trade_volume,total_volume,total_value,"
-    "total_buy_count,total_sell_count,"
-    "ask_price1,ask_volume1,bid_price1,bid_volume1,"
-    "ask_price2,ask_volume2,bid_price2,bid_volume2,"
-    "ask_price3,ask_volume3,bid_price3,bid_volume3,"
-    "ask_price4,ask_volume4,bid_price4,bid_volume4,"
-    "ask_price5,ask_volume5,bid_price5,bid_volume5,"
-    "derived_ask_price,derived_ask_volume,derived_bid_price,derived_bid_volume,"
-    "match_flag,build_type,orderbook_action,sequence\n";
+struct OrderbookCsvSchema {
+  static constexpr char const *header =
+      "trading_day,market,symbol,symbol_id,exchtime,localtime,reference_price,"
+      "open,high,low,last_price,trade_volume,total_volume,total_value,"
+      "total_buy_count,total_sell_count,"
+      "ask_price1,ask_volume1,bid_price1,bid_volume1,"
+      "ask_price2,ask_volume2,bid_price2,bid_volume2,"
+      "ask_price3,ask_volume3,bid_price3,bid_volume3,"
+      "ask_price4,ask_volume4,bid_price4,bid_volume4,"
+      "ask_price5,ask_volume5,bid_price5,bid_volume5,"
+      "derived_ask_price,derived_ask_volume,derived_bid_price,"
+      "derived_bid_volume,match_flag,build_type,orderbook_action,sequence";
+  static constexpr char const *format =
+      "{},{},{},{},{},{},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{},{},"
+      "{:.6f},{},{},{:.6f},{},{:.6f},{},{:.6f},{},{:.6f},{},{:.6f},"
+      "{},{:.6f},{},{:.6f},{},{:.6f},{},{:.6f},{},{:.6f},{},{:.6f},"
+      "{},{:.6f},{},{},{},{},{}";
+};
 
-constexpr std::string_view kBasicHeader =
-    "trading_day,market,symbol,kind_id,is_spread,basic_source,contract_type,"
-    "contract_subtype,reference_price,decimal_locator,strike_decimal_locator,"
-    "listing_date,delisting_date,delivery_date,flow_group,dynamic_banding,"
-    "multiplier,currency_code,currency,stock_id,contract_status,quote_flag,"
-    "block_trade_flag,expiry_type,underlying_type,close_group,end_session\n";
+struct BasicInfoCsvSchema {
+  static constexpr char const *header =
+      "trading_day,market,symbol,kind_id,is_spread,basic_source,contract_type,"
+      "contract_subtype,reference_price,decimal_locator,strike_decimal_locator,"
+      "listing_date,delisting_date,delivery_date,flow_group,dynamic_banding,"
+      "multiplier,currency_code,currency,stock_id,contract_status,quote_flag,"
+      "block_trade_flag,expiry_type,underlying_type,close_group,end_session";
+  static constexpr char const *format =
+      "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.4f},{},{},"
+      "{},{},{},{},{},{},{},{}";
+};
 
 bool Exists(const std::filesystem::path &path) {
   return std::filesystem::symlink_status(path).type() !=
@@ -63,10 +75,9 @@ void Rename(const std::filesystem::path &from, const std::filesystem::path &to,
   }
 }
 
-class StagedFile {
-public:
-  StagedFile(std::filesystem::path output_path, bool overwrite,
-             std::string_view header)
+class StagedFileBase {
+ public:
+  StagedFileBase(std::filesystem::path output_path, bool overwrite)
       : output_path_(std::move(output_path)), overwrite_(overwrite) {
     if (output_path_.empty()) {
       throw std::invalid_argument("CSV output path is empty");
@@ -85,69 +96,50 @@ public:
       throw std::runtime_error(fmt::format(
           "CSV partial output already exists: {}", partial_path_.string()));
     }
-    buffer_.resize(4U * 1024U * 1024U);
-    output_.rdbuf()->pubsetbuf(buffer_.data(),
-                               static_cast<std::streamsize>(buffer_.size()));
-    output_.open(partial_path_, std::ios::binary | std::ios::trunc);
-    if (!output_.is_open()) {
-      RemovePartial();
-      throw std::runtime_error(fmt::format(
-          "failed to open CSV partial output: {}", partial_path_.string()));
-    }
-    try {
-      Write(header);
-    } catch (...) {
-      output_.close();
-      RemovePartial();
-      throw;
-    }
   }
 
-  ~StagedFile() {
-    output_.close();
+  virtual ~StagedFileBase() {
     if (!published_) {
       RemovePartial();
     }
   }
 
-  StagedFile(const StagedFile &) = delete;
-  StagedFile &operator=(const StagedFile &) = delete;
+  StagedFileBase(const StagedFileBase &) = delete;
+  StagedFileBase &operator=(const StagedFileBase &) = delete;
 
-  void Write(std::string_view bytes) {
+  virtual void Prepare() = 0;
+
+  void VerifyPreparedFile() {
     if (prepared_) {
       throw std::logic_error("CSV output was already prepared");
     }
-    output_.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    if (!output_.good()) {
-      throw std::runtime_error(fmt::format("failed to write CSV output: {}",
-                                           partial_path_.string()));
+    if (std::filesystem::symlink_status(partial_path_).type() !=
+        std::filesystem::file_type::regular) {
+      throw std::runtime_error(
+          fmt::format("CSV partial output is not a regular file: {}",
+                      partial_path_.string()));
     }
-  }
-
-  void Prepare() {
-    output_.flush();
-    if (!output_.good()) {
-      throw std::runtime_error(fmt::format("failed to flush CSV output: {}",
-                                           partial_path_.string()));
-    }
-    output_.close();
-    if (output_.fail()) {
-      throw std::runtime_error(fmt::format("failed to close CSV output: {}",
+    if (std::filesystem::file_size(partial_path_) == 0) {
+      throw std::runtime_error(fmt::format("CSV partial output is empty: {}",
                                            partial_path_.string()));
     }
     prepared_ = true;
   }
 
-  void MarkPublished() noexcept { published_ = true; }
+  void MarkPublished() noexcept {
+    published_ = true;
+  }
   [[nodiscard]] const std::filesystem::path &output_path() const noexcept {
     return output_path_;
   }
   [[nodiscard]] const std::filesystem::path &partial_path() const noexcept {
     return partial_path_;
   }
-  [[nodiscard]] bool overwrite() const noexcept { return overwrite_; }
+  [[nodiscard]] bool overwrite() const noexcept {
+    return overwrite_;
+  }
 
-private:
+ protected:
   void RemovePartial() noexcept {
     std::error_code error;
     std::filesystem::remove(partial_path_, error);
@@ -158,8 +150,52 @@ private:
   bool overwrite_{};
   bool prepared_{};
   bool published_{};
-  std::ofstream output_;
-  std::vector<char> buffer_;
+};
+
+template <typename Schema>
+class StagedFile : public StagedFileBase {
+ public:
+  using Writer =
+      quill::CsvWriter<Schema, nova::LogManager::NovaFrontendOptions>;
+
+  StagedFile(const std::filesystem::path &output_path, bool overwrite)
+      : StagedFileBase(output_path, overwrite) {
+    if (nova::kLogManager.logger() == nullptr ||
+        !quill::Backend::is_running()) {
+      throw std::logic_error(
+          "Nova logging must be initialized before creating a CSV writer");
+    }
+    try {
+      writer_ = std::make_unique<Writer>(partial_path_.string());
+    } catch (...) {
+      RemovePartial();
+      throw;
+    }
+  }
+
+  ~StagedFile() {
+    writer_.reset();
+  }
+
+  template <typename... Args>
+  void Write(Args &&...args) {
+    if (prepared_) {
+      throw std::logic_error("CSV output was already prepared");
+    }
+    writer_->append_row(std::forward<Args>(args)...);
+  }
+
+  void Prepare() override {
+    if (prepared_) {
+      throw std::logic_error("CSV output was already prepared");
+    }
+    writer_->flush();
+    writer_.reset();
+    VerifyPreparedFile();
+  }
+
+ private:
+  std::unique_ptr<Writer> writer_;
 };
 
 std::string OptionalFixed(const std::optional<double> &value) {
@@ -183,13 +219,13 @@ std::string OptionalChar(const std::optional<char> &value) {
 }
 
 struct PublishState {
-  StagedFile *file{};
+  StagedFileBase *file{};
   std::filesystem::path backup;
   bool backed_up{};
   bool published{};
 };
 
-void PublishPair(StagedFile &first, StagedFile &second) {
+void PublishPair(StagedFileBase &first, StagedFileBase &second) {
   std::array<PublishState, 2> states{{
       {.file = &first, .backup = {}, .backed_up = false, .published = false},
       {.file = &second, .backup = {}, .backed_up = false, .published = false},
@@ -262,13 +298,12 @@ void PublishPair(StagedFile &first, StagedFile &second) {
   }
 }
 
-} // namespace
+}  // namespace
 
 struct CsvWriter::Impl {
   Impl(const std::filesystem::path &orderbook_path,
        const std::filesystem::path &basic_path, bool overwrite)
-      : orderbook(orderbook_path, overwrite, kOrderbookHeader),
-        basic(basic_path, overwrite, kBasicHeader) {
+      : orderbook(orderbook_path, overwrite), basic(basic_path, overwrite) {
     if (orderbook_path.lexically_normal() == basic_path.lexically_normal()) {
       throw std::invalid_argument(
           "orderbook and basic-info outputs must differ");
@@ -276,35 +311,27 @@ struct CsvWriter::Impl {
   }
 
   void WriteOrderbook(const Orderbook<5> &record) {
-    row.clear();
-    fmt::format_to(
-        std::back_inserter(row),
-        "{},TAIFEX,{},-1,{},{},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{},{},"
-        "{:.6f},{},{},",
-        record.trading_day, record.symbol, record.exchtime, record.localtime,
-        record.reference_price, record.open, record.high, record.low,
-        record.last_price, record.trade_volume, record.total_volume,
-        record.total_value, record.total_buy_count, record.total_sell_count);
-    for (std::size_t i = 0; i < 5; ++i) {
-      fmt::format_to(std::back_inserter(row), "{:.6f},{},{:.6f},{},",
-                     record.ask_price[i], record.ask_volume[i],
-                     record.bid_price[i], record.bid_volume[i]);
-    }
-    fmt::format_to(std::back_inserter(row), "{:.6f},{},{:.6f},{},{},{},{},{}\n",
-                   record.derived_ask_price, record.derived_ask_volume,
-                   record.derived_bid_price, record.derived_bid_volume,
-                   record.match_flag, record.build_type,
-                   record.orderbook_action, record.sequence);
-    orderbook.Write(std::string_view(row.data(), row.size()));
+    orderbook.Write(
+        record.trading_day, "TAIFEX", record.symbol, -1, record.exchtime,
+        record.localtime, record.reference_price, record.open, record.high,
+        record.low, record.last_price, record.trade_volume, record.total_volume,
+        record.total_value, record.total_buy_count, record.total_sell_count,
+        record.ask_price[0], record.ask_volume[0], record.bid_price[0],
+        record.bid_volume[0], record.ask_price[1], record.ask_volume[1],
+        record.bid_price[1], record.bid_volume[1], record.ask_price[2],
+        record.ask_volume[2], record.bid_price[2], record.bid_volume[2],
+        record.ask_price[3], record.ask_volume[3], record.bid_price[3],
+        record.bid_volume[3], record.ask_price[4], record.ask_volume[4],
+        record.bid_price[4], record.bid_volume[4], record.derived_ask_price,
+        record.derived_ask_volume, record.derived_bid_price,
+        record.derived_bid_volume, static_cast<unsigned>(record.match_flag),
+        static_cast<unsigned>(record.build_type),
+        static_cast<unsigned>(record.orderbook_action), record.sequence);
   }
 
   void WriteBasic(const BasicInfoRecord &record) {
-    row.clear();
-    fmt::format_to(
-        std::back_inserter(row),
-        "{},TAIFEX,{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.4f},{},{},"
-        "{},{},{},{},{},{},{},{}\n",
-        record.trading_day, record.symbol, record.kind_id,
+    basic.Write(
+        record.trading_day, "TAIFEX", record.symbol, record.kind_id,
         record.is_spread ? 1 : 0, record.basic_source, record.contract_type,
         record.contract_subtype, OptionalFixed(record.reference_price),
         record.decimal_locator, OptionalInteger(record.strike_decimal_locator),
@@ -315,12 +342,10 @@ struct CsvWriter::Impl {
         record.contract_status, record.quote_flag, record.block_trade_flag,
         record.expiry_type, record.underlying_type, record.close_group,
         record.end_session);
-    basic.Write(std::string_view(row.data(), row.size()));
   }
 
-  StagedFile orderbook;
-  StagedFile basic;
-  fmt::memory_buffer row;
+  StagedFile<OrderbookCsvSchema> orderbook;
+  StagedFile<BasicInfoCsvSchema> basic;
 };
 
 CsvWriter::CsvWriter(const std::filesystem::path &orderbook_path,
@@ -342,4 +367,4 @@ void CsvWriter::Commit(std::span<const BasicInfoRecord> basic_records) {
   PublishPair(impl_->orderbook, impl_->basic);
 }
 
-} // namespace aries::data::taifex
+}  // namespace aries::data::taifex

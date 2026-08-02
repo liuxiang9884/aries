@@ -154,8 +154,9 @@ block_trade_flag,expiry_type,underlying_type,close_group,end_session
 
 ## 与 Orion 的有意差异
 
-- 同步直接处理，不创建 SHM、不经 data reader、不使用 Quill CsvWriter；CSV 用
-  `std::ofstream` + `fmt` staged writer，Nova 只记录 CLI 日志。
+- 初始实现同步直接处理，不创建 SHM、不经 data reader，CSV 使用
+  `std::ofstream` + `fmt` staged writer；2026-08-02 后 writer 已迁移到 Nova frontend
+  的 Quill CsvWriter，decode/build 仍保持单线程同步，双文件 staged publication 不变。
 - 默认转换全部 futures，而不是只保留 near-two-month stock futures。
 - I083 按交易所定义清空整个普通与 derived book；Orion 仅清空缺失普通档。
 - I024 的 packet trade volume 按各 entry volume 正确求和，不重复累加累计值；

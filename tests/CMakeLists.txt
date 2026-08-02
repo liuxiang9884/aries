@@ -21,6 +21,7 @@ set_tests_properties(
 
 add_executable(
     twse_converter_tests
+    data/converter/converter_test_main.cpp
     data/converter/twse/basic_info_test.cpp
     data/converter/twse/bcd_decoder_test.cpp
     data/converter/twse/dump_converter_test.cpp
@@ -38,13 +39,15 @@ target_link_libraries(
     PRIVATE
         aries::project_options
         aries_twse_converter
-        GTest::gtest_main
+        GTest::gtest
+        nova
 )
 
 gtest_discover_tests(twse_converter_tests)
 
 add_executable(
     taifex_converter_tests
+    data/converter/converter_test_main.cpp
     data/converter/taifex/bcd_decoder_test.cpp
     data/converter/taifex/dump_converter_test.cpp
     data/converter/taifex/message_decoder_test.cpp
@@ -61,7 +64,8 @@ target_link_libraries(
     PRIVATE
         aries::project_options
         aries_taifex_converter
-        GTest::gtest_main
+        GTest::gtest
+        nova
 )
 
 gtest_discover_tests(taifex_converter_tests)

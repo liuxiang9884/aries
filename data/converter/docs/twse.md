@@ -197,12 +197,18 @@ orderbook CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不
 
 ## 输出实现边界
 
-- orderbook 与 basic-info 都使用同步 `ofstream` writer。Aquila 使用的
-  `quill::CsvWriter` 是异步 `append_row()`，无法在调用点提供与当前 writer
-  等价的磁盘写入错误传播，因此本工具只借鉴 compile-time schema 的组织思想，
-  不采用异步 writer。
+- orderbook 与 basic-info 都使用
+  `quill::CsvWriter<Schema, nova::LogManager::NovaFrontendOptions>`；header 与 format
+  由 compile-time schema 固定，typed field 通过 `append_row()` 进入 Nova 管理的
+  Quill backend。本次迁移保持当前 23/30 列、字段语义和数值格式不变。
+- writer 只打开同目录 `.partial.<pid>`；发布前依次执行 blocking `flush()`、销毁
+  Quill writer 并确认 partial 是非空 regular file，确保 backend 不再持有输出文件后
+  才进入 rename。
 - 两个输出均先写同目录 partial，完成后才进入发布；`--overwrite` 会先把两份旧
   输出移到 backup，任一 rename 在进程内失败时回滚新文件并恢复旧文件。
+- Quill backend 的异步格式化/磁盘错误不能从 `append_row()` 同步返回；Nova/Quill
+  日志是这类错误的直接诊断入口，partial 检查只能拦截文件缺失、类型错误和零字节结果，
+  不等价于逐行同步 I/O 错误传播。
 - 两次 final rename 不是文件系统级事务。进程被强杀、主机崩溃或断电发生在两次
   rename 之间时，无法保证跨文件原子性；下游应在任务成功退出后再消费两个文件，
   后续 manifest 设计应补充跨文件 commit marker / generation id。

@@ -50,7 +50,7 @@ sequential dump reader
   -> strict frame validation
   -> I010 product catalog + I011 contract catalog
   -> per-symbol product sequence + order book state
-  -> synchronous staged orderbook/basic CSV writer
+  -> Nova / Quill staged orderbook/basic CSV writer
   -> 日盘截止或 exact EOF 后发布
 ```
 
@@ -172,9 +172,13 @@ I012 内容变化和 cache overflow 都记录到日志但不阻止当日其余�
 未知 handled version、非法 BCD/enum/level、checksum/trailer 和输出 I/O 错误仍使当日
 失败；批处理必须记录该日失败并继续下一日。
 
-两份输出先写同目录 `.partial.<pid>`。日盘范围完整解码、截止/EOF finalization、
-basic-info 排序和成功 close 后才发布；`--overwrite` 会先备份两份旧文件，并在进程内 rename 失败时
-回滚。两次 final rename 仍不构成断电级跨文件事务，下游只能在进程成功退出后消费。
+两份输出使用 Nova frontend options 的 `quill::CsvWriter`，header/format 由
+compile-time schema 固定，并先写同目录 `.partial.<pid>`。日盘范围完整解码、
+截止/EOF finalization、basic-info 排序、blocking flush 和 writer close 后才发布；
+`--overwrite` 会先备份两份旧文件，并在进程内 rename 失败时回滚。本次 writer 迁移不
+改变当前 44/27 列 schema、`Orderbook<5>` 或数值格式。两次 final rename 仍不构成
+断电级跨文件事务，下游只能在进程成功退出后消费。Quill backend 错误不能从
+`append_row()` 同步返回，磁盘异常必须结合 Nova/Quill 日志与最终文件检查审计。
 
 ## 与 Orion 的有意差异
 
@@ -182,7 +186,7 @@ basic-info 排序和成功 close 后才发布；`--overwrite` 会先备份两份
 |---|---|---|
 | offline 架构 | DataEngine 写 SHM，DataReader 再构 book/CSV | 单进程同步 decode/build/write，无 SHM |
 | 资产池 | to_csv 只留近两月标准 stock futures | 全部 futures outright 与 spread |
-| CSV writer | Quill async CsvWriter | `std::ofstream` + `fmt` 同步 staged writer |
+| CSV writer | Quill async CsvWriter | 同为 Nova frontend 的 Quill CsvWriter；额外保留双文件 staged publish/rollback |
 | I083 | 只清空缺失普通档，derived 可能残留 | 按文档先清空整个普通与 derived book |
 | I024 packet volume | extra trade 路径重复累加累计 packet volume | 每个 trade quantity 只累计一次，exchange summary 作为 total volume |
 | OHLC | 第一笔成交以旧 last price 初始化 high/low | 第一笔 actual trade 直接初始化 open/high/low |

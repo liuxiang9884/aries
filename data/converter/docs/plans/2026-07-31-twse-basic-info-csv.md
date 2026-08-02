@@ -62,7 +62,9 @@ market_data_line
 - format1 的 TWSE/TPEX body offset 不完全相同；解析测试必须分别覆盖两种 layout。
 - format1 没有可用于安全确定版本先后的事件时间；发现同键字段变化时失败，以避免静默引入 look-ahead 或错误状态。
 - 两个输出文件的最终 rename 不是文件系统级事务；实现需用 staging/backup/rollback 协议，发布任一步失败时恢复旧文件并清理临时文件。
-- Quill CSV 为异步写入；只有在测试证明后端/磁盘错误能够可靠传播到 converter 时才替换当前同步 writer，否则保留同步 writer 并复用 schema 组织方式。
+- 初始实现因异步错误传播边界保留同步 writer；2026-08-02 按用户确认迁移到 Nova
+  frontend 的 Quill writer，并保留 partial/rollback，异步错误传播限制由当前
+  `data/converter/docs/twse.md` 明确记录。
 
 ## 实施步骤
 

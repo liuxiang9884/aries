@@ -1,4 +1,7 @@
-#include <algorithm>
+#include "data/converter/taifex/dump_converter.h"
+
+#include <unistd.h>
+
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -6,18 +9,15 @@
 #include <string>
 #include <vector>
 
-#include <unistd.h>
-
 #include <gtest/gtest.h>
 
-#include "data/converter/taifex/dump_converter.h"
 #include "tests/data/converter/taifex/test_message_builder.h"
 
 namespace aries::data::taifex {
 namespace {
 
 class TaifexDumpConverterTest : public ::testing::Test {
-protected:
+ protected:
   void SetUp() override {
     directory_ = std::filesystem::temp_directory_path() /
                  ("aries_taifex_converter_" + std::to_string(::getpid()) + "_" +
@@ -28,7 +28,9 @@ protected:
     basic_output_path_ = directory_ / "basic.csv";
   }
 
-  void TearDown() override { std::filesystem::remove_all(directory_); }
+  void TearDown() override {
+    std::filesystem::remove_all(directory_);
+  }
 
   ConvertOptions Options() const {
     return {.dump_path = dump_path_,
@@ -65,24 +67,36 @@ TEST_F(TaifexDumpConverterTest, ConvertsAndPublishesOrderbookAndBasicCsv) {
   std::ifstream orderbook_input(output_path_, std::ios::binary);
   const std::string orderbook((std::istreambuf_iterator<char>(orderbook_input)),
                               {});
-  EXPECT_NE(orderbook.find("trading_day,market,symbol,symbol_id"),
-            std::string::npos);
-  EXPECT_NE(orderbook.find("20260707,TAIFEX,TXFG6,-1,"), std::string::npos);
-  EXPECT_NE(orderbook.find(",22100.000000,3,3,13260000.000000,2,1,"),
-            std::string::npos);
-  EXPECT_EQ(orderbook.find("continuous_flag"), std::string::npos);
-  const auto header_end = orderbook.find('\n');
-  ASSERT_NE(header_end, std::string::npos);
-  EXPECT_EQ(std::count(orderbook.begin(), orderbook.begin() + header_end, ','),
-            43);
+  const std::string expected_orderbook =
+      "trading_day,market,symbol,symbol_id,exchtime,localtime,reference_price,"
+      "open,high,low,last_price,trade_volume,total_volume,total_value,"
+      "total_buy_count,total_sell_count,"
+      "ask_price1,ask_volume1,bid_price1,bid_volume1,"
+      "ask_price2,ask_volume2,bid_price2,bid_volume2,"
+      "ask_price3,ask_volume3,bid_price3,bid_volume3,"
+      "ask_price4,ask_volume4,bid_price4,bid_volume4,"
+      "ask_price5,ask_volume5,bid_price5,bid_volume5,"
+      "derived_ask_price,derived_ask_volume,derived_bid_price,"
+      "derived_bid_volume,match_flag,build_type,orderbook_action,sequence\n"
+      "20260707,TAIFEX,TXFG6,-1,1783386000000000000,1783386000000000000,"
+      "22000.000000,22100.000000,22100.000000,22100.000000,22100.000000,"
+      "3,3,13260000.000000,2,1,0.000000,0,22099.000000,7,0.000000,0,"
+      "0.000000,0,0.000000,0,0.000000,0,0.000000,0,0.000000,0,"
+      "0.000000,0,0.000000,0,0.000000,0,0.000000,0,0,0,1,2\n";
+  EXPECT_EQ(orderbook, expected_orderbook);
 
   std::ifstream basic_input(basic_output_path_, std::ios::binary);
   const std::string basic_csv((std::istreambuf_iterator<char>(basic_input)),
                               {});
-  EXPECT_NE(basic_csv.find("trading_day,market,symbol,kind_id,is_spread"),
-            std::string::npos);
-  EXPECT_NE(basic_csv.find("20260707,TAIFEX,TXFG6,TXF,0,I010+I011"),
-            std::string::npos);
+  const std::string expected_basic =
+      "trading_day,market,symbol,kind_id,is_spread,basic_source,contract_type,"
+      "contract_subtype,reference_price,decimal_locator,strike_decimal_locator,"
+      "listing_date,delisting_date,delivery_date,flow_group,dynamic_banding,"
+      "multiplier,currency_code,currency,stock_id,contract_status,quote_flag,"
+      "block_trade_flag,expiry_type,underlying_type,close_group,end_session\n"
+      "20260707,TAIFEX,TXFG6,TXF,0,I010+I011,I,I,22000.000000,2,0,"
+      "2026-01-01,2026-12-31,2026-12-31,1,Y,200.0000,1,TWD,,N,Y,Y,S, ,1,0\n";
+  EXPECT_EQ(basic_csv, expected_basic);
 }
 
 TEST_F(TaifexDumpConverterTest,
@@ -215,5 +229,5 @@ TEST_F(TaifexDumpConverterTest, PublishesOutputsWhenMetadataNeverArrives) {
   EXPECT_EQ(stats.issues.front().symbol, "TXFG6");
 }
 
-} // namespace
-} // namespace aries::data::taifex
+}  // namespace
+}  // namespace aries::data::taifex

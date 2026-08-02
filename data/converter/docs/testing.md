@@ -1,6 +1,6 @@
 # Data Converter 验证说明
 
-更新时间：2026-08-01
+更新时间：2026-08-02
 
 ## TWSE Focused Tests
 
@@ -25,6 +25,8 @@ ctest --test-dir build/debug \
 - orderbook / basic-info CSV 内容、multiplier 与 odd-lot value 单位、dry-run、默认
   拒绝覆盖、缺失 multiplier 隔离、best-effort 双文件发布、双文件旧版本保护、
   partial symlink / 目录防护和发布回滚。
+- 测试 binary 显式初始化 Nova backend；端到端 fixture 对迁移后的 Quill writer 做
+  blocking flush/close 后逐 byte CSV 对照，锁定现有 schema 与数值格式。
 
 ## 完整 Dump Dry-run
 
@@ -143,7 +145,8 @@ high/low、I081 顺序更新、I083 全量清空、I084 gap recovery、I002 rese
 spread 开盘、snapshot statistics 防回滚/安全合并、未恢复 gap 与永久 metadata
 缺失的问题摘要/继续发布、单 symbol cache overflow 隔离、checksum、truncated
 trailer、13:45:59 inclusive / 13:46 exclusive 日盘硬截止、dry-run 和双 CSV
-原子发布。
+原子发布。端到端 fixture 对 Quill writer 的 44 列 orderbook 和 27 列 basic-info
+输出做逐 byte 对照。
 
 ## TAIFEX 完整 Dump 验证
 
@@ -177,3 +180,26 @@ day_cutoff_reached=true day_cutoff_offset=5640462381
 sequence 严格递增、basic symbol 排序且唯一、multiplier 大于 0。负价格必须只出现在
 calendar spread，`total_value` 必须非负。当前 contract 的全量重建输出位于
 `/tw_backup/data/tw/csv/future/`；完成后再记录固定 hash 基线。
+
+## Nova / Quill Writer 迁移验证
+
+2026-08-02 在保持当前 `Orderbook<5>` 与 CSV schema 不变的前提下，将两个 converter
+迁移到 Nova frontend 的 Quill writer。除完整 CTest 外，迁移前后的 executable 对相同
+真实输入分别转换并执行 `cmp`：
+
+| 市场 / 输入 | 消息 | orderbook 数据行 | basic-info 数据行 | 结果 |
+|---|---:|---:|---:|---|
+| TWSE 2026-04-06 完整 dump，429,426,360 bytes | 3,771,162 | 18,094 | 44,915 | 两份 CSV 均逐 byte 相同 |
+| TAIFEX 2026-02-11 frame-aligned 前缀，67,109,260 bytes | 147,715 | 23 | 1,753 | 两份 CSV 均逐 byte 相同 |
+
+对应 SHA-256：
+
+| 输出 | SHA-256 |
+|---|---|
+| TWSE orderbook | `e418d8a570e598ddb53772938d59dd90d2c036a0777c99fdd8f5a9df1b6ce99c` |
+| TWSE basic-info | `d30463b60d01024b0c24349a504bb91a131a1849fda48d78de830b0e28624977` |
+| TAIFEX orderbook | `2a5d7b09e46745d12f8dd8dbc1fc1439bcb3856b15460f603ad978b7a1672fab` |
+| TAIFEX basic-info | `6ba707e3489849f7e8b9babcd0586961d32ab9a8a9a039d6dd852be97ed887f1` |
+
+验证产物保存在 `/home/liuxiang/tmp/aries-quill-rows-smoke.jMbMOX/`；它们是 scratch
+结果，不进入 git，也不作为长期数据版本事实源。

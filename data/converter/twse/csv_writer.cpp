@@ -1,39 +1,50 @@
 #include "data/converter/twse/csv_writer.h"
 
+#include <unistd.h>
+
 #include <array>
 #include <cerrno>
 #include <cstdio>
-#include <fstream>
-#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
-#include <vector>
-
-#include <unistd.h>
 
 #include <fmt/format.h>
+#include <quill/CsvWriter.h>
+
+#include "nova/utils/log.h"
 
 namespace aries::data::twse {
 namespace {
 
-constexpr std::string_view kOrderbookHeader =
-    "symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,"
-    "ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,"
-    "ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,"
-    "total_volume,total_value,status,sequence\n";
+struct OrderbookCsvSchema {
+  static constexpr char const *header =
+      "symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,"
+      "ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,"
+      "ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,"
+      "total_volume,total_value,status,sequence";
+  static constexpr char const *format =
+      "{},{},{},{},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},"
+      "{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{},{},{:.2f},"
+      "{},{}";
+};
 
-constexpr std::string_view kBasicInfoHeader =
-    "trading_day,market,symbol,industry_code,security_type,anomaly_code,"
-    "stock_group_code,board_code,reference_price,high_limit,low_limit,"
-    "abnormal_recommendation,special_abnormal,day_trading_code,"
-    "margin_short_exempt,borrow_short_exempt,matching_cycle_seconds,"
-    "warrant_flag,strike_price,previous_exercise_volume,"
-    "previous_cancellation_volume,outstanding_volume,exercise_ratio,"
-    "warrant_upper_price,warrant_lower_price,maturity_date,"
-    "foreign_stock_flag,multiplier,currency,market_data_line\n";
+struct BasicInfoCsvSchema {
+  static constexpr char const *header =
+      "trading_day,market,symbol,industry_code,security_type,anomaly_code,"
+      "stock_group_code,board_code,reference_price,high_limit,low_limit,"
+      "abnormal_recommendation,special_abnormal,day_trading_code,"
+      "margin_short_exempt,borrow_short_exempt,matching_cycle_seconds,"
+      "warrant_flag,strike_price,previous_exercise_volume,"
+      "previous_cancellation_volume,outstanding_volume,exercise_ratio,"
+      "warrant_upper_price,warrant_lower_price,maturity_date,"
+      "foreign_stock_flag,multiplier,currency,market_data_line";
+  static constexpr char const *format =
+      "{},{},{},{},{},{},{},{},{:.4f},{:.4f},{:.4f},{},{},{},{},{},"
+      "{},{},{},{},{},{},{},{},{},{},{},{},{},{}";
+};
 
 bool DirectoryEntryExists(const std::filesystem::path &path) {
   return std::filesystem::symlink_status(path).type() !=
@@ -50,10 +61,10 @@ void RequireReplaceableOutput(const std::filesystem::path &path) {
   }
 }
 
-class StagedCsvFile {
-public:
-  StagedCsvFile(const std::filesystem::path &requested_output_path,
-                bool allow_overwrite, std::string_view header)
+class StagedCsvFileBase {
+ public:
+  StagedCsvFileBase(const std::filesystem::path &requested_output_path,
+                    bool allow_overwrite)
       : output_path_(requested_output_path), overwrite_(allow_overwrite) {
     if (output_path_.empty()) {
       throw std::invalid_argument("CSV output path is empty");
@@ -74,64 +85,39 @@ public:
       throw std::runtime_error(fmt::format(
           "CSV partial output already exists: {}", partial_path_.string()));
     }
-
-    file_buffer_.resize(4U * 1024U * 1024U);
-    output_.rdbuf()->pubsetbuf(
-        file_buffer_.data(), static_cast<std::streamsize>(file_buffer_.size()));
-    output_.open(partial_path_, std::ios::binary | std::ios::trunc);
-    if (!output_.is_open()) {
-      RemovePartial();
-      throw std::runtime_error(fmt::format(
-          "failed to open CSV partial output: {}", partial_path_.string()));
-    }
-    try {
-      Write(header);
-    } catch (...) {
-      output_.close();
-      RemovePartial();
-      throw;
-    }
   }
 
-  ~StagedCsvFile() {
-    output_.close();
+  virtual ~StagedCsvFileBase() {
     if (!published_) {
       RemovePartial();
     }
   }
 
-  StagedCsvFile(const StagedCsvFile &) = delete;
-  StagedCsvFile &operator=(const StagedCsvFile &) = delete;
+  StagedCsvFileBase(const StagedCsvFileBase &) = delete;
+  StagedCsvFileBase &operator=(const StagedCsvFileBase &) = delete;
 
-  void Write(std::string_view bytes) {
+  virtual void Prepare() = 0;
+
+  void VerifyPreparedFile() {
     if (prepared_) {
       throw std::logic_error("CSV output was already prepared");
     }
-    output_.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    if (!output_.good()) {
-      throw std::runtime_error(fmt::format("failed to write CSV output: {}",
-                                           partial_path_.string()));
+    if (std::filesystem::symlink_status(partial_path_).type() !=
+        std::filesystem::file_type::regular) {
+      throw std::runtime_error(
+          fmt::format("CSV partial output is not a regular file: {}",
+                      partial_path_.string()));
     }
-  }
-
-  void Prepare() {
-    if (prepared_) {
-      throw std::logic_error("CSV output was already prepared");
-    }
-    output_.flush();
-    if (!output_.good()) {
-      throw std::runtime_error(fmt::format("failed to flush CSV output: {}",
-                                           partial_path_.string()));
-    }
-    output_.close();
-    if (output_.fail()) {
-      throw std::runtime_error(fmt::format("failed to close CSV output: {}",
+    if (std::filesystem::file_size(partial_path_) == 0) {
+      throw std::runtime_error(fmt::format("CSV partial output is empty: {}",
                                            partial_path_.string()));
     }
     prepared_ = true;
   }
 
-  void MarkPublished() noexcept { published_ = true; }
+  void MarkPublished() noexcept {
+    published_ = true;
+  }
 
   [[nodiscard]] const std::filesystem::path &output_path() const noexcept {
     return output_path_;
@@ -141,9 +127,11 @@ public:
     return partial_path_;
   }
 
-  [[nodiscard]] bool overwrite() const noexcept { return overwrite_; }
+  [[nodiscard]] bool overwrite() const noexcept {
+    return overwrite_;
+  }
 
-private:
+ protected:
   void RemovePartial() noexcept {
     std::error_code error;
     std::filesystem::remove(partial_path_, error);
@@ -154,8 +142,52 @@ private:
   bool overwrite_{};
   bool prepared_{};
   bool published_{};
-  std::ofstream output_;
-  std::vector<char> file_buffer_;
+};
+
+template <typename Schema>
+class StagedCsvFile : public StagedCsvFileBase {
+ public:
+  using Writer =
+      quill::CsvWriter<Schema, nova::LogManager::NovaFrontendOptions>;
+
+  StagedCsvFile(const std::filesystem::path &output_path, bool overwrite)
+      : StagedCsvFileBase(output_path, overwrite) {
+    if (nova::kLogManager.logger() == nullptr ||
+        !quill::Backend::is_running()) {
+      throw std::logic_error(
+          "Nova logging must be initialized before creating a CSV writer");
+    }
+    try {
+      writer_ = std::make_unique<Writer>(partial_path_.string());
+    } catch (...) {
+      RemovePartial();
+      throw;
+    }
+  }
+
+  ~StagedCsvFile() {
+    writer_.reset();
+  }
+
+  template <typename... Args>
+  void Write(Args &&...args) {
+    if (prepared_) {
+      throw std::logic_error("CSV output was already prepared");
+    }
+    writer_->append_row(std::forward<Args>(args)...);
+  }
+
+  void Prepare() override {
+    if (prepared_) {
+      throw std::logic_error("CSV output was already prepared");
+    }
+    writer_->flush();
+    writer_.reset();
+    VerifyPreparedFile();
+  }
+
+ private:
+  std::unique_ptr<Writer> writer_;
 };
 
 std::string OptionalInteger(const std::optional<std::uint64_t> &value) {
@@ -176,7 +208,7 @@ std::string OptionalDate(const std::optional<std::int32_t> &value) {
 }
 
 struct PublishState {
-  StagedCsvFile *file{};
+  StagedCsvFileBase *file{};
   std::filesystem::path backup_path;
   bool backed_up{};
   bool published{};
@@ -191,65 +223,51 @@ void Rename(const std::filesystem::path &from, const std::filesystem::path &to,
   }
 }
 
-} // namespace
+}  // namespace
 
 struct OrderbookCsvWriter::Impl {
   Impl(const std::filesystem::path &output_path, bool overwrite)
-      : file(output_path, overwrite, kOrderbookHeader) {}
+      : file(output_path, overwrite) {}
 
   void Write(const Orderbook<5> &record) {
-    row_buffer.clear();
-    fmt::format_to(
-        std::back_inserter(row_buffer),
-        "{},-1,{},{},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},"
-        "{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{},{},{:.2f},"
-        "{},{}\n",
-        record.symbol, record.exchtime, record.localtime, record.high_limit,
-        record.low_limit, record.last_price, record.ask_price[0],
-        record.bid_price[0], record.ask_price[1], record.bid_price[1],
-        record.ask_price[2], record.bid_price[2], record.ask_price[3],
-        record.bid_price[3], record.ask_price[4], record.bid_price[4],
-        record.open, record.total_trade, record.total_volume,
-        record.total_value, record.status, record.sequence);
-    file.Write(std::string_view(row_buffer.data(), row_buffer.size()));
+    file.Write(record.symbol, -1, record.exchtime, record.localtime,
+               record.high_limit, record.low_limit, record.last_price,
+               record.ask_price[0], record.bid_price[0], record.ask_price[1],
+               record.bid_price[1], record.ask_price[2], record.bid_price[2],
+               record.ask_price[3], record.bid_price[3], record.ask_price[4],
+               record.bid_price[4], record.open, record.total_trade,
+               record.total_volume, record.total_value, record.status,
+               record.sequence);
   }
 
-  StagedCsvFile file;
-  fmt::memory_buffer row_buffer;
+  StagedCsvFile<OrderbookCsvSchema> file;
 };
 
 struct BasicInfoCsvWriter::Impl {
   Impl(const std::filesystem::path &output_path, bool overwrite)
-      : file(output_path, overwrite, kBasicInfoHeader) {}
+      : file(output_path, overwrite) {}
 
   void Write(const BasicInfoRecord &record) {
-    row_buffer.clear();
-    fmt::format_to(
-        std::back_inserter(row_buffer),
-        "{},{},{},{},{},{},{},{},{:.4f},{:.4f},{:.4f},{},{},{},{},{},"
-        "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
-        record.trading_day, record.market, record.symbol, record.industry_code,
-        record.security_type, record.anomaly_code,
-        record.stock_group_code.value_or(""), record.board_code,
-        record.reference_price, record.high_limit, record.low_limit,
-        record.abnormal_recommendation, record.special_abnormal,
-        record.day_trading_code, record.margin_short_exempt,
-        record.borrow_short_exempt, record.matching_cycle_seconds,
-        record.warrant_flag, OptionalFixed(record.strike_price, 4),
-        OptionalInteger(record.previous_exercise_volume),
-        OptionalInteger(record.previous_cancellation_volume),
-        OptionalInteger(record.outstanding_volume),
-        OptionalFixed(record.exercise_ratio, 5),
-        OptionalFixed(record.warrant_upper_price, 4),
-        OptionalFixed(record.warrant_lower_price, 4),
-        OptionalDate(record.maturity_date),
-        record.foreign_stock_flag.value_or(""), record.multiplier,
-        record.currency, record.market_data_line);
-    file.Write(std::string_view(row_buffer.data(), row_buffer.size()));
+    file.Write(record.trading_day, record.market, record.symbol,
+               record.industry_code, record.security_type, record.anomaly_code,
+               record.stock_group_code.value_or(""), record.board_code,
+               record.reference_price, record.high_limit, record.low_limit,
+               record.abnormal_recommendation, record.special_abnormal,
+               record.day_trading_code, record.margin_short_exempt,
+               record.borrow_short_exempt, record.matching_cycle_seconds,
+               record.warrant_flag, OptionalFixed(record.strike_price, 4),
+               OptionalInteger(record.previous_exercise_volume),
+               OptionalInteger(record.previous_cancellation_volume),
+               OptionalInteger(record.outstanding_volume),
+               OptionalFixed(record.exercise_ratio, 5),
+               OptionalFixed(record.warrant_upper_price, 4),
+               OptionalFixed(record.warrant_lower_price, 4),
+               OptionalDate(record.maturity_date),
+               record.foreign_stock_flag.value_or(""), record.multiplier,
+               record.currency, record.market_data_line);
   }
 
-  StagedCsvFile file;
-  fmt::memory_buffer row_buffer;
+  StagedCsvFile<BasicInfoCsvSchema> file;
 };
 
 OrderbookCsvWriter::OrderbookCsvWriter(const std::filesystem::path &output_path,
@@ -259,8 +277,8 @@ OrderbookCsvWriter::OrderbookCsvWriter(const std::filesystem::path &output_path,
 OrderbookCsvWriter::~OrderbookCsvWriter() = default;
 OrderbookCsvWriter::OrderbookCsvWriter(OrderbookCsvWriter &&) noexcept =
     default;
-OrderbookCsvWriter &
-OrderbookCsvWriter::operator=(OrderbookCsvWriter &&) noexcept = default;
+OrderbookCsvWriter &OrderbookCsvWriter::operator=(
+    OrderbookCsvWriter &&) noexcept = default;
 
 void OrderbookCsvWriter::Write(const Orderbook<5> &record) {
   impl_->Write(record);
@@ -273,8 +291,8 @@ BasicInfoCsvWriter::BasicInfoCsvWriter(const std::filesystem::path &output_path,
 BasicInfoCsvWriter::~BasicInfoCsvWriter() = default;
 BasicInfoCsvWriter::BasicInfoCsvWriter(BasicInfoCsvWriter &&) noexcept =
     default;
-BasicInfoCsvWriter &
-BasicInfoCsvWriter::operator=(BasicInfoCsvWriter &&) noexcept = default;
+BasicInfoCsvWriter &BasicInfoCsvWriter::operator=(
+    BasicInfoCsvWriter &&) noexcept = default;
 
 void BasicInfoCsvWriter::Write(const BasicInfoRecord &record) {
   impl_->Write(record);
@@ -367,4 +385,4 @@ void CsvOutputTransaction::Commit(OrderbookCsvWriter &orderbook_writer,
   }
 }
 
-} // namespace aries::data::twse
+}  // namespace aries::data::twse

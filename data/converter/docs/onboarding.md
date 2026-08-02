@@ -1,6 +1,6 @@
 # Data Converter 模块 Onboarding
 
-更新时间：2026-08-01
+更新时间：2026-08-02
 
 ## 模块职责
 
@@ -22,6 +22,9 @@
 - `taifex_dump_converter` 已同步解析全部 TAIFEX futures outright 与 spread，
   输出 44 列 research orderbook CSV 和 27 列 basic-info CSV；reader 在第一条
   `13:46:00` 消息处硬停止，不依赖 SHM。
+- TWSE / TPEx 与 TAIFEX CSV 均使用 Nova frontend options 的
+  `quill::CsvWriter`；compile-time schema 负责 header/format，完成 blocking flush
+  并关闭 writer 后才发布同目录 partial。原有 `ofstream + fmt` writer 已删除。
 - 2026-07-07 真实 TAIFEX dump 已按当前 contract 完成 full dry-run；读取
   61,605,862 条日盘消息，模拟输出 54,086,067 条 orderbook 行与 4,839 条 basic-info 行，
   并解析 154,880 条 I012。
@@ -42,6 +45,8 @@
 - converter 的归一化盘口对象统一命名为各 exchange namespace 下的
   `Orderbook<N>`，`N` 决定 bid/ask 档位数组长度；当前 TWSE 与 TAIFEX 均显式使用
   `Orderbook<5>`。交易所原始协议中的 `Depth` 名称保持不变。
+- 本次 writer 迁移不改变两套 `Orderbook<5>`、basic-info record、列顺序、字段语义或
+  数值格式；统一 Orderbook/Trade schema 仍是后续独立迁移。
 - 当前 23 列 CSV 是 Orion legacy compatibility contract，不直接升级为正式研究 schema。
 - basic-info CSV 的主键、列顺序、空值、单位和 format1 重复处理以
   `data/converter/docs/twse.md` 为事实源；Big5/CP950 名称不解析、不输出。
@@ -50,6 +55,9 @@
 - legacy CSV 丢弃 bid / ask volume；正式 schema 必须另行设计和版本化。
 - 非 dry-run 必须提供 orderbook 与 basic-info 两个不同路径；运行时错误不发布半文件，
   `--overwrite` 下会恢复旧输出。进程崩溃或断电跨两次 rename 不具备文件系统事务保证。
+- 非 dry-run writer 要求调用方已初始化 Nova logging backend；两个 CLI 和测试入口均负责
+  该生命周期。Quill 的异步 backend 错误不会由 `append_row()` 同步抛回 core，必须结合
+  Nova/Quill 日志和最终文件校验判断磁盘层异常。
 - TWSE frame recovery 最多向前扫描 1 MiB，只接受完整通过 frame 校验的重同步点；
   可识别的受损 symbol 后续不再输出，避免错误延续累计 `total_value`。具体状态和日志
   contract 以 `data/converter/docs/twse.md` 为准。

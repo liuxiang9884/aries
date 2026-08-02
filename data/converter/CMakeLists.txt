@@ -1,5 +1,6 @@
 find_package(CLI11 CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(quill CONFIG REQUIRED)
 
 add_library(
     aries_twse_converter
@@ -22,6 +23,8 @@ target_link_libraries(
         aries::project_options
     PRIVATE
         fmt::fmt
+        nova
+        quill::quill
 )
 
 add_executable(
@@ -65,6 +68,8 @@ target_link_libraries(
         aries::project_options
     PRIVATE
         fmt::fmt
+        nova
+        quill::quill
 )
 
 add_executable(
