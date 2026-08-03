@@ -9,6 +9,7 @@
   Orderbook 的可推导字段。
 - 明确 aggressor side 不是 exchange fact，并记录基于撮合前完整五档的研究推断边界。
 - 记录 trade flow 与 book notional flow 的候选定义，并明确暂缓到 source schema 完成后。
+- 建立固定序号的字段决策表，逐项记录 CSV 去留、建议与用户最终决定。
 - 更新 converter onboarding 和 TWSE 专题文档入口，确保新对话能找到该设计。
 
 ## 非目标
@@ -42,6 +43,7 @@
 7. 补充成交方向的 `buy/sell/unknown`、match group、可用时点和 look-ahead 边界。
 8. 记录 signed trade value、direction coverage 与五档净订单名义流，标记为 deferred。
 9. 运行文档一致性搜索、`git diff --check` 和完整 diff review 后原子提交。
+10. 建立 `twse_orderbook_fields.md`，保持 1–28 固定编号，供后续逐项锁定决定。
 
 ## 验证门
 

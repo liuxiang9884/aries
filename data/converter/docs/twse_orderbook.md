@@ -6,6 +6,10 @@
 Orion-compatible 23 列 orderbook CSV 为准。本文是后续股票专属 `Orderbook<N>`
 schema review 的事实源，不描述当前已经发布的数据版本。
 
+逐字段去留、CSV 持久化建议与用户最终决定统一记录在
+`data/converter/docs/twse_orderbook_fields.md`；本文继续作为字段语义、协议来源和边界的
+事实源。
+
 ## 结论
 
 TWSE / TPEx 与 TAIFEX 应继续使用各自 exchange namespace 下的独立
@@ -431,7 +435,8 @@ money-flow factor。待 Orderbook/Trade 新 schema、match group、方向覆盖�
 
 ## 与 Orion 的有意差异
 
-- 不保留 `symbol_id=-1` 或 packed decimal `status` 作为正式研究字段。
+- 不在正式 CSV 保留固定的 `symbol_id=-1`；内部使用真实 dense `symbol_id`，但不将其作为
+  跨运行持久化身份。packed decimal `status` 同样不保留。
 - `total_trade` 更名并修正为 actual `trade_volume`，不沿用 Orion 的错误注释。
 - actual last/OHLC/volume/value 不被 trial 或 held message 污染。
 - 股票 CSV 首次完整输出 bid/ask volume。

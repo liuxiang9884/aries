@@ -42,6 +42,8 @@
 - TAIFEX 测试：`tests/data/converter/taifex/`
 - 协议与 Orion 差异：`data/converter/docs/twse.md`
 - TWSE / TPEx 股票 Orderbook 字段设计：`data/converter/docs/twse_orderbook.md`
+- TWSE / TPEx 股票 Orderbook 逐字段决策表：
+  `data/converter/docs/twse_orderbook_fields.md`
 - TAIFEX schema、恢复语义与 Orion 差异：`data/converter/docs/taifex.md`
 - TAIFEX Futures Orderbook / Trade 字段设计：
   `data/converter/docs/taifex_orderbook_trade.md`
