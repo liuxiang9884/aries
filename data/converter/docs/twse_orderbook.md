@@ -316,6 +316,72 @@ trade_sequence,inferred_side,side_method,inference_source_sequence
 - 实施后必须在指定日期、market、format 和无 gap 资产池上报告
   `buy/sell/unknown` 覆盖率与一致性检查结果，再决定是否作为正式研究特征。
 
+### Money flow 与盘口订单流（deferred）
+
+状态：**研究衍生指标，暂缓实现**。这些指标不进入 raw `Orderbook<N>` 或 `Trade`
+schema；先完成并验证两张 source data 表，再在 factors/research 层建立独立事实源。
+
+成交方向可用后，actual Trade 的 signed notional 建议定义为：
+
+```text
+trade_notional = price * volume * effective_multiplier
+
+signed_trade_value = +trade_notional  if inferred_side == buy
+signed_trade_value = -trade_notional  if inferred_side == sell
+signed_trade_value = unknown          if inferred_side == unknown
+```
+
+- format 6/17 的 `effective_multiplier` 是 basic-info 中每交易单位的证券数量。
+- format 23 的 volume 已是股数，`effective_multiplier=1`。
+- 每笔成交同时有买方和卖方；这里的正负表示 aggressive buy/sell imbalance，不应解释为
+  市场真的流入或流出现金。
+- `unknown` 不得按 0 混进方向统计，应单独累计 `unknown_trade_value`。
+
+窗口级候选指标为：
+
+```text
+buy_trade_value
+sell_trade_value
+unknown_trade_value
+total_trade_value = buy_trade_value + sell_trade_value + unknown_trade_value
+net_trade_flow = buy_trade_value - sell_trade_value
+trade_flow_imbalance = net_trade_flow / (buy_trade_value + sell_trade_value)
+direction_coverage = (buy_trade_value + sell_trade_value) / total_trade_value
+```
+
+任何 `net_trade_flow` / `trade_flow_imbalance` 结果必须同时报告
+`direction_coverage`、样本日期、market、format、资产池、窗口和 gap filter；分母为 0 时
+指标为空，不填 0。
+
+普通五档只能进一步推导 price-level **净订单量**，不能恢复真实挂单或撤单事件。对撮合前后
+都仍可见的同一价格：
+
+```text
+net_order_volume = after_volume - before_volume + executed_resting_volume
+book_notional_flow = side_sign * price * net_order_volume * effective_multiplier
+
+side_sign = +1 for bid
+side_sign = -1 for ask
+```
+
+因此 bid 净挂单和 ask 净撤单形成正压力，bid 净撤单和 ask 净挂单形成负压力。该值应命名
+为 `book_notional_flow`，不能称为实际成交资金流，也不能把 net change 伪装成单笔
+New/Cancel action。
+
+盘口流计算还必须遵守：
+
+- 价格在 before/after 两份 book 中都可见时才计算；按 price 对齐，不能按 level 对齐。
+- 第五档进入/退出可见范围时无法判断是新增、撤单还是从第六档移动，输出 `unknown`。
+- 市价委托为 `price=0, volume>0`，不能直接计算 price notional，应单列 volume。
+- trial、集合竞价、暂缓撮合、source gap、incomplete match group 和 invalidated symbol 排除。
+- 若方向要等最终五档确认，聚合必须从 `inference_source_sequence` 对应的可用时点开始，
+  不能把结论回填到更早 Trade 形成 look-ahead。
+- currency 不同的 value 不经 FX conversion 不得横向合计。
+
+当前决定是分别保留 `trade_flow` 与 `book_notional_flow` 的定义，不设计组合权重或综合
+money-flow factor。待 Orderbook/Trade 新 schema、match group、方向覆盖率和真实数据验证
+完成后，再通过独立可复现实验决定窗口、标准化、level weighting 与是否进入正式因子库。
+
 ## high / low 与 snapshot 字段
 
 股票 Orderbook 应增加 actual `high/low`，但不能通过未来统计回填早期行：

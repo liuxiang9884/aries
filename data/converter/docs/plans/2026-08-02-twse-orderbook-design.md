@@ -8,6 +8,7 @@
 - 记录文档中存在但当前输出缺失的状态、盘口和逐笔信息，以及不应加入
   Orderbook 的可推导字段。
 - 明确 aggressor side 不是 exchange fact，并记录基于撮合前完整五档的研究推断边界。
+- 记录 trade flow 与 book notional flow 的候选定义，并明确暂缓到 source schema 完成后。
 - 更新 converter onboarding 和 TWSE 专题文档入口，确保新对话能找到该设计。
 
 ## 非目标
@@ -16,6 +17,7 @@
 - 不改变当前 23 列 orderbook 与 30 列 basic-info contract。
 - 不决定 TAIFEX `Orderbook<N>` 的最终字段；股票和期货保持各自 exchange
   namespace 下的独立 struct。
+- 不实现或选择 money-flow factor、窗口、标准化、level weighting 或组合权重。
 - 不提交或迁移旧 worktree 中尚未合并的统一 Orderbook 方案。
 
 ## 文档事实源
@@ -38,7 +40,8 @@
    缺口，但不在本任务修复。
 6. 更新 onboarding 与 `twse.md` 的按需阅读入口。
 7. 补充成交方向的 `buy/sell/unknown`、match group、可用时点和 look-ahead 边界。
-8. 运行文档一致性搜索、`git diff --check` 和完整 diff review 后原子提交。
+8. 记录 signed trade value、direction coverage 与五档净订单名义流，标记为 deferred。
+9. 运行文档一致性搜索、`git diff --check` 和完整 diff review 后原子提交。
 
 ## 验证门
 
@@ -48,6 +51,8 @@
 - actual/trial、trade-only/full-book 和真实/fallback local time 必须有明确语义。
 - aggressor side 推断必须要求连续撮合、完整 pre-match book 和无 gap；无法唯一判断时输出
   `unknown`，并记录方向实际可用的 source sequence。
+- money flow 必须区分 actual executed notional 与非成交 book pressure；未知方向、第五档
+  边界、市价单、currency 和可用时点均有显式规则。
 - `data/converter/docs/onboarding.md` 与 `data/converter/docs/twse.md` 能定位到唯一专题事实源。
 - `git diff --check` 通过，工作区不含代码或无关文件修改。
 
