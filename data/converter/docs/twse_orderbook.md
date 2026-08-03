@@ -276,6 +276,46 @@ source_message,source_sequence,sequence
 - aggressor side、order id、queue position 和 per-level order count 未由协议提供，不得
   通过猜测写成 exchange fact。
 
+### 成交方向的研究推断
+
+format 6/17/23 都不直接提供 aggressor side。对 format 6/17，这里的“逐笔”表示每笔
+incoming order 撮合后逐次揭示成交价量，并在最后一笔揭示撮合后的聚合五档；它不是包含
+order id、新增、改单、撤单和 queue position 的 Market-by-Order feed。因此 raw
+`Trade` 不增加 `side`，但在严格条件下可以另行推断 `inferred_side`：
+
+1. 只处理 actual、连续撮合且 source sequence 无 gap 的消息。
+2. 在一组撮合开始前保存最近一份完整五档；不能使用 trade-only 行被错误清空后的 book。
+3. 将连续 trade-only 与最后一条 `trade_orderbook` 组成同一 incoming-order match group。
+4. 成交路径消耗撮合前 ask 时推断为 `buy`，消耗撮合前 bid 时推断为 `sell`；撮合后的
+   最终五档只用于一致性检查，不单独作为方向证据。
+5. 同一完整 match group 内的 Trade 继承同一 incoming side；不能按每条成交后的 book
+   变化分别猜测。
+
+上述 match-group 算法只适用于 bit 0 明确定义 trade-only/final-book 的 format 6/17。
+format 23 的 bit 0 是保留位，不能套用相同的 group boundary；在取得真实 odd-lot dump 并
+验证其连续撮合与盘口发布节奏前，format 23 的 `inferred_side` 默认 `unknown`。
+
+以下情况必须输出 `unknown`，不能强制二分类：
+
+- 集合竞价、开盘或收盘撮合；
+- trial、暂缓撮合或其他非 actual payload；
+- 缺少撮合前完整五档、source gap、frame recovery 或撮合组不完整；
+- 成交超出可见五档，或成交价无法与撮合前 bid/ask path 唯一对应；
+- 同一状态同时符合两侧、特殊市价状态或其他协议边界。
+
+建议在研究衍生数据中使用：
+
+```text
+trade_sequence,inferred_side,side_method,inference_source_sequence
+```
+
+- `inferred_side=buy/sell/unknown`；`side_method=pre_match_book`。
+- `inference_source_sequence` 记录方向结论实际可用时的 source sequence。若算法使用最后
+  一条五档做确认，不得把确认结果按较早 Trade 的 `exchange_ns` 回填成当时已知信息，
+  以免在实时特征或回测中产生 look-ahead。
+- 实施后必须在指定日期、market、format 和无 gap 资产池上报告
+  `buy/sell/unknown` 覆盖率与一致性检查结果，再决定是否作为正式研究特征。
+
 ## high / low 与 snapshot 字段
 
 股票 Orderbook 应增加 actual `high/low`，但不能通过未来统计回填早期行：
@@ -304,7 +344,7 @@ source_message,source_sequence,sequence
 | format 19 暂停/恢复、其他 lifecycle 状态 | 独立 `InstrumentStatus` |
 | format 2/4 市场/类别统计 | market statistics，不伪造成 per-symbol 字段 |
 | quality/recovery flag | 日级 manifest/log；当前受损 symbol 直接 invalidated |
-| aggressor side | 协议未提供；tick rule/book inference 只能作为研究推断 |
+| aggressor side | 协议未提供；按本文规则进入带 `unknown` 和可用时点的研究衍生数据 |
 | order count、order id、queue position | 协议未提供，禁止伪造 |
 
 ## 相对当前实现必须修正的行为

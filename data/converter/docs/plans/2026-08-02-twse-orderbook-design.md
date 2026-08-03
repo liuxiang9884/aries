@@ -7,6 +7,7 @@
 - 逐一记录当前字段的保留、改名、移出和语义收紧建议。
 - 记录文档中存在但当前输出缺失的状态、盘口和逐笔信息，以及不应加入
   Orderbook 的可推导字段。
+- 明确 aggressor side 不是 exchange fact，并记录基于撮合前完整五档的研究推断边界。
 - 更新 converter onboarding 和 TWSE 专题文档入口，确保新对话能找到该设计。
 
 ## 非目标
@@ -36,7 +37,8 @@
 5. 记录 current decoder 的 trade-only、trial、format 22 multiplier 和 CSV volume
    缺口，但不在本任务修复。
 6. 更新 onboarding 与 `twse.md` 的按需阅读入口。
-7. 运行文档一致性搜索、`git diff --check` 和完整 diff review 后原子提交。
+7. 补充成交方向的 `buy/sell/unknown`、match group、可用时点和 look-ahead 边界。
+8. 运行文档一致性搜索、`git diff --check` 和完整 diff review 后原子提交。
 
 ## 验证门
 
@@ -44,6 +46,8 @@
 - 数量单位必须区分 format 6/17 的交易单位与 format 23 的股数。
 - `reference_price`、涨跌停、multiplier 与动态盘口字段的归属不得互相矛盾。
 - actual/trial、trade-only/full-book 和真实/fallback local time 必须有明确语义。
+- aggressor side 推断必须要求连续撮合、完整 pre-match book 和无 gap；无法唯一判断时输出
+  `unknown`，并记录方向实际可用的 source sequence。
 - `data/converter/docs/onboarding.md` 与 `data/converter/docs/twse.md` 能定位到唯一专题事实源。
 - `git diff --check` 通过，工作区不含代码或无关文件修改。
 
