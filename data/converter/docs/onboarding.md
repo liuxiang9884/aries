@@ -1,6 +1,6 @@
 # Data Converter 模块 Onboarding
 
-更新时间：2026-08-02
+更新时间：2026-08-03
 
 ## 模块职责
 
@@ -28,8 +28,8 @@
 - 2026-07-07 真实 TAIFEX dump 已按当前 contract 完成 full dry-run；读取
   61,605,862 条日盘消息，模拟输出 54,086,067 条 orderbook 行与 4,839 条 basic-info 行，
   并解析 154,880 条 I012。
-- 股票与期货专属的下一版 Orderbook / Trade 字段审查均已形成设计专题，但尚未修改
-  当前 records、CSV schema 或历史输出。期货设计明确 I024 一项一条 Trade、
+- 股票下一版 Orderbook 字段已经锁定，Trade 字段仍待讨论；当前 records、CSV schema 与
+  历史输出均未修改。期货设计明确 I024 一项一条 Trade、
   `MATCH-TIME` / `INFORMATION-TIME` 分离、actual/trial book 分离，以及普通/
   derived/statistics 分表。
 
@@ -42,8 +42,6 @@
 - TAIFEX 测试：`tests/data/converter/taifex/`
 - 协议与 Orion 差异：`data/converter/docs/twse.md`
 - TWSE / TPEx 股票 Orderbook 字段设计：`data/converter/docs/twse_orderbook.md`
-- TWSE / TPEx 股票 Orderbook 逐字段决策表：
-  `data/converter/docs/twse_orderbook_fields.md`
 - TAIFEX schema、恢复语义与 Orion 差异：`data/converter/docs/taifex.md`
 - TAIFEX Futures Orderbook / Trade 字段设计：
   `data/converter/docs/taifex_orderbook_trade.md`
@@ -65,7 +63,8 @@
   `data/converter/docs/twse.md` 为事实源；Big5/CP950 名称不解析、不输出。
 - 交易日按 UTC+8 自然日零点解释；offline `localtime = exchtime`、
   `symbol_id = -1`。
-- legacy CSV 丢弃 bid / ask volume；正式 schema 必须另行设计和版本化。
+- legacy CSV 丢弃 bid / ask volume；下一版 Orderbook 字段已在专题文档锁定，待 Trade
+  字段完成后统一实施并建立新 schema version。
 - 非 dry-run 必须提供 orderbook 与 basic-info 两个不同路径；运行时错误不发布半文件，
   `--overwrite` 下会恢复旧输出。进程崩溃或断电跨两次 rename 不具备文件系统事务保证。
 - 非 dry-run writer 要求调用方已初始化 Nova logging backend；两个 CLI 和测试入口均负责
