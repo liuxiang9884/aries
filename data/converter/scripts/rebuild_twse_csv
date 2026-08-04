@@ -92,10 +92,32 @@ if [[ -n "$non_trading_days_file" && ! -f "$non_trading_days_file" ]]; then
   exit 2
 fi
 
+converter_sha256=$(sha256sum -- "$converter" | awk '{print $1}')
+
 mkdir -p "$raw_dir" "$csv_dir" "$run_dir"
 summary="$run_dir/summary.tsv"
-printf 'date\tresult\tpublication\tinput_source\tconverter_exit\tdepth_bytes\tbasic_bytes\tlog\n' \
+printf 'date\tresult\tpublication\tinput_source\tconverter_exit\tconverter_sha256\tschema\torderbook_bytes\tbasic_bytes\tlog\n' \
   >"$summary"
+
+orderbook_v2_header='symbol,market,exchange_ns,local_ns,disclosure,limit_state,session_state,trade_side,trade_count,last_price,open,high,low,trade_volume,total_volume,total_value,ask_price1,ask_volume1,ask_price2,ask_volume2,ask_price3,ask_volume3,ask_price4,ask_volume4,ask_price5,ask_volume5,bid_price1,bid_volume1,bid_price2,bid_volume2,bid_price3,bid_volume3,bid_price4,bid_volume4,bid_price5,bid_volume5,source_sequence'
+orderbook_legacy_header='symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,total_volume,total_value,status,sequence'
+
+detect_orderbook_schema() {
+  local path=$1
+  local header=
+  if [[ ! -f "$path" ]]; then
+    printf 'missing\n'
+    return
+  fi
+  IFS= read -r header <"$path" || true
+  if [[ "$header" == "$orderbook_v2_header" ]]; then
+    printf 'twse-orderbook-v2\n'
+  elif [[ "$header" == "$orderbook_legacy_header" ]]; then
+    printf 'twse-orderbook-legacy-23\n'
+  else
+    printf 'unknown\n'
+  fi
+}
 
 path_identity() {
   local path=$1
@@ -107,9 +129,9 @@ path_identity() {
 }
 
 existing_publication() {
-  local depth=$1
+  local orderbook=$1
   local basic=$2
-  if [[ -s "$depth" && -s "$basic" ]]; then
+  if [[ -s "$orderbook" && -s "$basic" ]]; then
     printf 'preserved_previous\n'
   else
     printf 'not_published\n'
@@ -142,22 +164,25 @@ process_day() {
   local date=$1
   local dump="$raw_dir/twse_stock_${date}.dump"
   local archive="$archive_dir/twse_stock_${date}.dump.tar.gz"
-  local depth="$csv_dir/twse_stock_${date}.csv"
+  local orderbook="$csv_dir/twse_stock_${date}.csv"
   local basic="$csv_dir/twse_basic_info_${date}.csv"
   local extract_dir=
   local extracted=
-  local before_depth
+  local before_orderbook
   local before_basic
-  local after_depth
+  local after_orderbook
   local after_basic
   local converter_status
+  local converter_schema
   local publication_status_valid=false
 
   day_result=
   day_publication=
   day_input_source=
   day_converter_exit=-1
-  printf 'date=%s start=%s\n' "$date" "$(date --iso-8601=seconds)"
+  day_schema=$(detect_orderbook_schema "$orderbook")
+  printf 'date=%s start=%s converter=%s converter_sha256=%s\n' \
+    "$date" "$(date --iso-8601=seconds)" "$converter" "$converter_sha256"
 
   if [[ -s "$dump" ]]; then
     day_input_source=existing_raw
@@ -165,7 +190,7 @@ process_day() {
       "$dump" "$(stat -c %s "$dump")"
   elif [[ -f "$dump" ]]; then
     day_input_source=empty_raw
-    day_publication=$(existing_publication "$depth" "$basic")
+    day_publication=$(existing_publication "$orderbook" "$basic")
     if is_non_trading_day "$date"; then
       day_result=non_trading_day
     else
@@ -177,13 +202,13 @@ process_day() {
     day_input_source=archive
     if [[ ! -f "$archive" ]]; then
       day_result=missing_input
-      day_publication=$(existing_publication "$depth" "$basic")
+      day_publication=$(existing_publication "$orderbook" "$basic")
       printf 'error=missing_input dump=%s archive=%s\n' "$dump" "$archive"
       return
     fi
     if ! gzip -t -- "$archive"; then
       day_result=input_corrupt
-      day_publication=$(existing_publication "$depth" "$basic")
+      day_publication=$(existing_publication "$orderbook" "$basic")
       printf 'error=archive_integrity_failed archive=%s\n' "$archive"
       return
     fi
@@ -195,14 +220,14 @@ process_day() {
       -C "$extract_dir" -- "twse_stock_${date}.dump"; then
       cleanup_extract_dir "$date" "$extract_dir"
       day_result=input_corrupt
-      day_publication=$(existing_publication "$depth" "$basic")
+      day_publication=$(existing_publication "$orderbook" "$basic")
       printf 'error=archive_extraction_failed archive=%s\n' "$archive"
       return
     fi
     extracted="$extract_dir/twse_stock_${date}.dump"
     if [[ ! -s "$extracted" ]]; then
       cleanup_extract_dir "$date" "$extract_dir"
-      day_publication=$(existing_publication "$depth" "$basic")
+      day_publication=$(existing_publication "$orderbook" "$basic")
       if is_non_trading_day "$date"; then
         day_result=non_trading_day
       else
@@ -216,51 +241,61 @@ process_day() {
     printf 'raw_published=%s bytes=%s\n' "$dump" "$(stat -c %s "$dump")"
   fi
 
-  before_depth=$(path_identity "$depth")
+  before_orderbook=$(path_identity "$orderbook")
   before_basic=$(path_identity "$basic")
   if nice -n 10 ionice -c2 -n7 "$converter" \
     --dump "$dump" \
     --trading-day "$date" \
     --symbol-filter-mode stock \
-    --output "$depth" \
+    --output "$orderbook" \
     --basic-output "$basic" \
     --overwrite; then
     day_converter_exit=0
   else
     day_converter_exit=$?
   fi
-  after_depth=$(path_identity "$depth")
+  after_orderbook=$(path_identity "$orderbook")
   after_basic=$(path_identity "$basic")
+  day_schema=$(detect_orderbook_schema "$orderbook")
 
-  if [[ "$after_depth" != missing && "$after_basic" != missing &&
-        "$after_depth" != "$before_depth" &&
+  if [[ "$after_orderbook" != missing && "$after_basic" != missing &&
+        "$after_orderbook" != "$before_orderbook" &&
         "$after_basic" != "$before_basic" ]]; then
     converter_status=$(sed -n 's/.*TWSE conversion complete: status=\([^ ]*\).*/\1/p' \
       "$day_log" | tail -1)
-    case "$converter_status" in
-    published_complete)
-      day_publication=published_complete
-      publication_status_valid=true
-      ;;
-    published_partial)
-      day_publication=published_partial
-      publication_status_valid=true
-      ;;
-    *)
-      day_publication=published_partial
-      printf 'error=missing_or_invalid_converter_publication_status value=%s\n' \
-        "$converter_status"
-      ;;
-    esac
-  elif [[ "$after_depth" == "$before_depth" &&
+    converter_schema=$(sed -n 's/.*TWSE conversion complete:.*schema=\([^ ]*\).*/\1/p' \
+      "$day_log" | tail -1)
+    if [[ "$day_schema" != twse-orderbook-v2 ||
+          "$converter_schema" != twse-orderbook-v2 ]]; then
+      day_publication=published_unexpected_schema
+      printf 'error=unexpected_orderbook_schema header=%s converter=%s\n' \
+        "$day_schema" "${converter_schema:-missing}"
+    else
+      case "$converter_status" in
+      published_complete)
+        day_publication=published_complete
+        publication_status_valid=true
+        ;;
+      published_partial)
+        day_publication=published_partial
+        publication_status_valid=true
+        ;;
+      *)
+        day_publication=published_partial
+        printf 'error=missing_or_invalid_converter_publication_status value=%s\n' \
+          "$converter_status"
+        ;;
+      esac
+    fi
+  elif [[ "$after_orderbook" == "$before_orderbook" &&
           "$after_basic" == "$before_basic" ]]; then
-    day_publication=$(existing_publication "$depth" "$basic")
+    day_publication=$(existing_publication "$orderbook" "$basic")
   else
     day_publication=not_published
-    printf 'error=output_pair_changed_non_atomically depth_before=%s ' \
-      "$before_depth"
-    printf 'depth_after=%s basic_before=%s basic_after=%s\n' \
-      "$after_depth" "$before_basic" "$after_basic"
+    printf 'error=output_pair_changed_non_atomically orderbook_before=%s ' \
+      "$before_orderbook"
+    printf 'orderbook_after=%s basic_before=%s basic_after=%s\n' \
+      "$after_orderbook" "$before_basic" "$after_basic"
   fi
 
   if [[ $day_converter_exit -ne 0 ]]; then
@@ -286,15 +321,16 @@ while IFS= read -r date || [[ -n "$date" ]]; do
   fi
   day_log="$run_dir/${date}.log"
   process_day "$date" >"$day_log" 2>&1
-  depth="$csv_dir/twse_stock_${date}.csv"
+  orderbook="$csv_dir/twse_stock_${date}.csv"
   basic="$csv_dir/twse_basic_info_${date}.csv"
-  depth_bytes=0
+  orderbook_bytes=0
   basic_bytes=0
-  [[ -f "$depth" ]] && depth_bytes=$(stat -c %s "$depth")
+  [[ -f "$orderbook" ]] && orderbook_bytes=$(stat -c %s "$orderbook")
   [[ -f "$basic" ]] && basic_bytes=$(stat -c %s "$basic")
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$date" "$day_result" "$day_publication" "$day_input_source" \
-    "$day_converter_exit" "$depth_bytes" "$basic_bytes" "$day_log" \
+    "$day_converter_exit" "$converter_sha256" "$day_schema" "$orderbook_bytes" \
+    "$basic_bytes" "$day_log" \
     >>"$summary"
 done <"$dates_file"
 

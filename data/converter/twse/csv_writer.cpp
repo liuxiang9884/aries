@@ -21,14 +21,17 @@ namespace {
 
 struct OrderbookCsvSchema {
   static constexpr char const *header =
-      "symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,"
-      "ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,"
-      "ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,"
-      "total_volume,total_value,status,sequence";
+      "symbol,market,exchange_ns,local_ns,disclosure,limit_state,"
+      "session_state,trade_side,trade_count,last_price,open,high,low,"
+      "trade_volume,total_volume,total_value,ask_price1,ask_volume1,"
+      "ask_price2,ask_volume2,ask_price3,ask_volume3,ask_price4,"
+      "ask_volume4,ask_price5,ask_volume5,bid_price1,bid_volume1,"
+      "bid_price2,bid_volume2,bid_price3,bid_volume3,bid_price4,"
+      "bid_volume4,bid_price5,bid_volume5,source_sequence";
   static constexpr char const *format =
-      "{},{},{},{},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},"
-      "{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{},{},{:.2f},"
-      "{},{}";
+      "{},{},{},{},{},{},{},{},{},{:.4f},{:.4f},{:.4f},{:.4f},{},{},"
+      "{:.4f},{:.4f},{},{:.4f},{},{:.4f},{},{:.4f},{},{:.4f},{},"
+      "{:.4f},{},{:.4f},{},{:.4f},{},{:.4f},{},{:.4f},{},{}";
 };
 
 struct BasicInfoCsvSchema {
@@ -230,14 +233,21 @@ struct OrderbookCsvWriter::Impl {
       : file(output_path, overwrite) {}
 
   void Write(const Orderbook<5> &record) {
-    file.Write(record.symbol, -1, record.exchtime, record.localtime,
-               record.high_limit, record.low_limit, record.last_price,
-               record.ask_price[0], record.bid_price[0], record.ask_price[1],
-               record.bid_price[1], record.ask_price[2], record.bid_price[2],
-               record.ask_price[3], record.bid_price[3], record.ask_price[4],
-               record.bid_price[4], record.open, record.total_trade,
-               record.total_volume, record.total_value, record.status,
-               record.sequence);
+    file.Write(
+        record.symbol, static_cast<unsigned>(record.market), record.exchange_ns,
+        record.local_ns, static_cast<unsigned>(record.disclosure.value),
+        static_cast<unsigned>(record.limit_state.value),
+        static_cast<unsigned>(record.session_state.value),
+        static_cast<unsigned>(record.trade_side), record.trade_count,
+        record.last_price, record.open, record.high, record.low,
+        record.trade_volume, record.total_volume, record.total_value,
+        record.ask_price[0], record.ask_volume[0], record.ask_price[1],
+        record.ask_volume[1], record.ask_price[2], record.ask_volume[2],
+        record.ask_price[3], record.ask_volume[3], record.ask_price[4],
+        record.ask_volume[4], record.bid_price[0], record.bid_volume[0],
+        record.bid_price[1], record.bid_volume[1], record.bid_price[2],
+        record.bid_volume[2], record.bid_price[3], record.bid_volume[3],
+        record.bid_price[4], record.bid_volume[4], record.source_sequence);
   }
 
   StagedCsvFile<OrderbookCsvSchema> file;

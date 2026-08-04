@@ -142,9 +142,9 @@ inline std::vector<std::uint8_t> MakeBasicInfo(const BasicInfoFields &fields) {
   return body;
 }
 
-inline std::vector<std::uint8_t>
-MakeBasicControl(std::string_view count, std::string_view control,
-                 ServiceType service_type = ServiceType::kListed) {
+inline std::vector<std::uint8_t> MakeBasicControl(
+    std::string_view count, std::string_view control,
+    ServiceType service_type = ServiceType::kListed) {
   BasicInfoFields fields{
       .symbol = std::string(count),
       .service_type = service_type,
@@ -153,10 +153,10 @@ MakeBasicControl(std::string_view count, std::string_view control,
   return MakeBasicInfo(fields);
 }
 
-inline std::vector<std::uint8_t>
-MakeStockBasic(std::string_view symbol, std::uint64_t previous_close,
-               std::uint64_t high_limit, std::uint64_t low_limit,
-               ServiceType service_type = ServiceType::kListed) {
+inline std::vector<std::uint8_t> MakeStockBasic(
+    std::string_view symbol, std::uint64_t previous_close,
+    std::uint64_t high_limit, std::uint64_t low_limit,
+    ServiceType service_type = ServiceType::kListed) {
   return MakeBasicInfo(BasicInfoFields{
       .symbol = std::string(symbol),
       .service_type = service_type,
@@ -180,11 +180,12 @@ inline std::vector<std::uint8_t> MakeOddLotBasic(std::string_view symbol,
   return body;
 }
 
-inline std::vector<std::uint8_t>
-MakeDepth(std::string_view symbol, std::uint64_t exchange_time,
-          std::uint64_t total_volume, bool is_traded, std::uint8_t bid_levels,
-          std::uint8_t ask_levels, std::span<const Level> levels,
-          std::uint8_t status = 0, std::uint8_t limit_flag = 0) {
+inline std::vector<std::uint8_t> MakeDepth(
+    std::string_view symbol, std::uint64_t exchange_time,
+    std::uint64_t total_volume, bool is_traded, std::uint8_t bid_levels,
+    std::uint8_t ask_levels, std::span<const Level> levels,
+    std::uint8_t status = 0, std::uint8_t limit_flag = 0,
+    bool disclosure_tag = false) {
   const auto expected_levels =
       static_cast<std::size_t>(is_traded) + bid_levels + ask_levels;
   if (levels.size() != expected_levels) {
@@ -197,7 +198,8 @@ MakeDepth(std::string_view symbol, std::uint64_t exchange_time,
   PutSymbol(body, symbol);
   PutBcd<6>(body, protocol::kDepthTimeOffset, exchange_time);
   body[protocol::kDepthDataFlagOffset] = static_cast<std::uint8_t>(
-      (is_traded ? 0x80U : 0U) | (bid_levels << 4U) | (ask_levels << 1U));
+      (is_traded ? 0x80U : 0U) | (bid_levels << 4U) | (ask_levels << 1U) |
+      (disclosure_tag ? 0x01U : 0U));
   body[protocol::kDepthLimitFlagOffset] = limit_flag;
   body[protocol::kDepthStatusOffset] = status;
   PutBcd<4>(body, protocol::kStockTotalVolumeOffset, total_volume);
@@ -213,12 +215,12 @@ MakeDepth(std::string_view symbol, std::uint64_t exchange_time,
   return body;
 }
 
-inline std::vector<std::uint8_t>
-MakeOddLotDepth(std::string_view symbol, std::uint64_t exchange_time,
-                std::uint64_t total_volume, bool is_traded,
-                std::uint8_t bid_levels, std::uint8_t ask_levels,
-                std::span<const Level> levels, std::uint8_t status = 0,
-                std::uint8_t limit_flag = 0) {
+inline std::vector<std::uint8_t> MakeOddLotDepth(
+    std::string_view symbol, std::uint64_t exchange_time,
+    std::uint64_t total_volume, bool is_traded, std::uint8_t bid_levels,
+    std::uint8_t ask_levels, std::span<const Level> levels,
+    std::uint8_t status = 0, std::uint8_t limit_flag = 0,
+    bool disclosure_tag = false) {
   const auto expected_levels =
       static_cast<std::size_t>(is_traded) + bid_levels + ask_levels;
   if (levels.size() != expected_levels) {
@@ -231,7 +233,8 @@ MakeOddLotDepth(std::string_view symbol, std::uint64_t exchange_time,
   PutSymbol(body, symbol);
   PutBcd<6>(body, protocol::kDepthTimeOffset, exchange_time);
   body[protocol::kDepthDataFlagOffset] = static_cast<std::uint8_t>(
-      (is_traded ? 0x80U : 0U) | (bid_levels << 4U) | (ask_levels << 1U));
+      (is_traded ? 0x80U : 0U) | (bid_levels << 4U) | (ask_levels << 1U) |
+      (disclosure_tag ? 0x01U : 0U));
   body[protocol::kDepthLimitFlagOffset] = limit_flag;
   body[protocol::kDepthStatusOffset] = status;
   PutBcd<6>(body, protocol::kOddLotTotalVolumeOffset, total_volume);
@@ -252,17 +255,17 @@ inline MessageHeader MakeHeader(MessageType type, std::size_t body_size,
                                 ServiceType service = ServiceType::kListed) {
   std::uint8_t format_version = protocol::kOddLotFormatVersion;
   switch (type) {
-  case MessageType::kStockBasicInfo:
-    format_version = protocol::kStockBasicFormatVersion;
-    break;
-  case MessageType::kStockDepthV:
-  case MessageType::kWarrantDepthV:
-    format_version = protocol::kStockDepthFormatVersion;
-    break;
-  case MessageType::kStockOddLotBasicInfo:
-  case MessageType::kStockOddLotDepthV:
-  default:
-    break;
+    case MessageType::kStockBasicInfo:
+      format_version = protocol::kStockBasicFormatVersion;
+      break;
+    case MessageType::kStockDepthV:
+    case MessageType::kWarrantDepthV:
+      format_version = protocol::kStockDepthFormatVersion;
+      break;
+    case MessageType::kStockOddLotBasicInfo:
+    case MessageType::kStockOddLotDepthV:
+    default:
+      break;
   }
   return MessageHeader{
       .message_length = protocol::kHeaderSize + body_size,
@@ -314,4 +317,4 @@ inline void WriteBinaryFile(const std::filesystem::path &path,
                static_cast<std::streamsize>(bytes.size()));
 }
 
-} // namespace aries::data::twse::test
+}  // namespace aries::data::twse::test

@@ -15,6 +15,7 @@
 #include <fmt/format.h>
 
 #include "data/converter/twse/basic_info.h"
+#include "data/converter/twse/bcd_decoder.h"
 #include "data/converter/twse/csv_writer.h"
 #include "data/converter/twse/protocol.h"
 
@@ -131,20 +132,33 @@ std::optional<std::uint64_t> FindNextValidFrame(std::ifstream &input,
 
 bool HasSymbolPrefix(MessageType message_type) {
   switch (message_type) {
-  case MessageType::kStockBasicInfo:
-  case MessageType::kStockDepthV:
-  case MessageType::kStockOddLotBasicInfo:
-  case MessageType::kStockOddLotDepthV:
-  case MessageType::kWarrantDepthV:
-    return true;
-  default:
-    return false;
+    case MessageType::kStockBasicInfo:
+    case MessageType::kStockDepthV:
+    case MessageType::kStockOddLotBasicInfo:
+    case MessageType::kStockOddLotDepthV:
+    case MessageType::kWarrantDepthV:
+      return true;
+    default:
+      return false;
   }
 }
 
-std::optional<std::string>
-AffectedSymbol(const std::optional<MessageHeader> &header,
-               std::span<const std::uint8_t> body) {
+bool HasDepthTime(MessageType message_type) {
+  return message_type == MessageType::kStockDepthV ||
+         message_type == MessageType::kWarrantDepthV ||
+         message_type == MessageType::kStockOddLotDepthV;
+}
+
+bool IsEndControlSymbol(std::span<const std::uint8_t> body) {
+  constexpr std::string_view kEndControlSymbol = "000000";
+  return body.size() >= kEndControlSymbol.size() &&
+         std::equal(kEndControlSymbol.begin(), kEndControlSymbol.end(),
+                    body.begin());
+}
+
+std::optional<std::string> AffectedSymbol(
+    const std::optional<MessageHeader> &header,
+    std::span<const std::uint8_t> body) {
   if (!header.has_value() || !HasSymbolPrefix(header->message_type) ||
       body.size() < protocol::kSymbolSize) {
     return std::nullopt;
@@ -166,7 +180,7 @@ AffectedSymbol(const std::optional<MessageHeader> &header,
   return std::string(reinterpret_cast<const char *>(body.data()), end);
 }
 
-} // namespace
+}  // namespace
 
 ConvertStats ConvertDump(const ConvertOptions &options) {
   if (options.dump_path.empty()) {
@@ -208,6 +222,8 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
   std::array<std::uint8_t, protocol::kHeaderSize> raw_header{};
   std::vector<std::uint8_t> body;
   const auto file_size = std::filesystem::file_size(options.dump_path);
+  const auto trading_day_start_ns =
+      TradingDayStartNanoseconds(options.trading_day);
   std::uint64_t offset = 0;
   while (offset < file_size) {
     std::optional<MessageHeader> decoded_header;
@@ -241,8 +257,9 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
       const auto affected_symbol = AffectedSymbol(
           decoded_header, std::span<const std::uint8_t>(body).first(
                               std::min(body.size(), available_body_size)));
-      if (affected_symbol.has_value()) {
-        decoder.InvalidateSymbol(*affected_symbol);
+      if (affected_symbol.has_value() && decoded_header.has_value()) {
+        decoder.InvalidateSymbol(decoded_header->service_type,
+                                 *affected_symbol);
       }
       const auto recovered_offset =
           FindNextValidFrame(input, offset + 1, file_size);
@@ -287,7 +304,15 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
           decoder.ApplyBasicInfo(*basic_info);
         }
       } else {
-        record = decoder.Process(header, body);
+        std::int64_t local_ns = 0;
+        if (HasDepthTime(header.message_type) && !IsEndControlSymbol(body) &&
+            body.size() >= protocol::kDepthTimeOffset + 6) {
+          local_ns = trading_day_start_ns +
+                     DecodeBcdTimeNanoseconds(
+                         std::span<const std::uint8_t>(body).subspan(
+                             protocol::kDepthTimeOffset, 6));
+        }
+        record = decoder.Process(header, body, local_ns);
       }
       ++stats.messages_read;
       if (record != nullptr) {
@@ -305,17 +330,33 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
     }
   }
 
+  decoder.Finalize();
   stats.symbols_seen = decoder.symbol_count();
   stats.basic_info_messages = basic_info_catalog.normal_messages();
   stats.basic_info_controls = basic_info_catalog.control_records();
   stats.basic_info_duplicates = basic_info_catalog.identical_duplicates();
   stats.basic_info_cycle_mismatches = basic_info_catalog.cycle_mismatches();
-  stats.missing_multiplier_messages = decoder.missing_multiplier_messages();
-  stats.invalidated_symbol_messages = decoder.invalidated_symbol_messages();
-  stats.missing_multiplier_symbols.assign(
-      decoder.missing_multiplier_symbols().begin(),
-      decoder.missing_multiplier_symbols().end());
-  std::ranges::sort(stats.missing_multiplier_symbols);
+  const auto &decoder_stats = decoder.stats();
+  stats.source_actual_trade_payloads =
+      decoder_stats.source_actual_trade_payloads;
+  stats.actual_trade_payloads = decoder_stats.actual_trade_payloads;
+  stats.match_groups = decoder_stats.match_groups;
+  stats.multi_trade_groups = decoder_stats.multi_trade_groups;
+  stats.trades_in_multi_groups = decoder_stats.trades_in_multi_groups;
+  stats.held_ended_groups = decoder_stats.held_ended_groups;
+  stats.buy_groups = decoder_stats.buy_groups;
+  stats.sell_groups = decoder_stats.sell_groups;
+  stats.unknown_groups = decoder_stats.unknown_groups;
+  stats.missing_multiplier_messages = decoder_stats.missing_multiplier_messages;
+  stats.invalidated_symbol_messages = decoder_stats.invalidated_symbol_messages;
+  stats.missing_multiplier_symbols = decoder_stats.missing_multiplier_symbols;
+  std::ranges::sort(stats.missing_multiplier_symbols, {},
+                    [](const MarketSymbolIssue &issue) {
+                      return std::pair{issue.market, issue.symbol};
+                    });
+  stats.sequence_gaps = decoder_stats.sequence_gaps;
+  stats.incomplete_match_groups = decoder_stats.incomplete_match_groups;
+  stats.value_imputations = decoder_stats.value_imputations;
   const auto basic_info_records = basic_info_catalog.records();
   stats.basic_info_rows = basic_info_records.size();
   if (stats.messages_read == 0 && !stats.frame_recovery_issues.empty()) {
@@ -333,4 +374,4 @@ ConvertStats ConvertDump(const ConvertOptions &options) {
   return stats;
 }
 
-} // namespace aries::data::twse
+}  // namespace aries::data::twse

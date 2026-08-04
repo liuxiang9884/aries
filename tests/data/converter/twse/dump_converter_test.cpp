@@ -1,16 +1,18 @@
+#include "data/converter/twse/dump_converter.h"
+
+#include <unistd.h>
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <vector>
-
-#include <unistd.h>
 
 #include <gtest/gtest.h>
 
-#include "data/converter/twse/dump_converter.h"
 #include "tests/data/converter/twse/test_message_builder.h"
 
 namespace aries::data::twse {
@@ -18,8 +20,22 @@ namespace {
 
 using test::Level;
 
+std::vector<std::string> SplitCsvLine(std::string_view line) {
+  std::vector<std::string> fields;
+  std::size_t start = 0;
+  while (start <= line.size()) {
+    const auto end = line.find(',', start);
+    fields.emplace_back(line.substr(start, end - start));
+    if (end == std::string_view::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+  return fields;
+}
+
 class DumpConverterTest : public ::testing::Test {
-protected:
+ protected:
   void SetUp() override {
     directory_ = std::filesystem::temp_directory_path() /
                  ("aries_twse_converter_" + std::to_string(::getpid()) + "_" +
@@ -30,7 +46,9 @@ protected:
     basic_output_path_ = directory_ / "basic_info.csv";
   }
 
-  void TearDown() override { std::filesystem::remove_all(directory_); }
+  void TearDown() override {
+    std::filesystem::remove_all(directory_);
+  }
 
   std::vector<std::uint8_t> MakeStockDump() const {
     std::vector<std::uint8_t> dump;
@@ -82,13 +100,17 @@ TEST_F(DumpConverterTest, ConvertsDumpToOrderbookCsvAndPublishesAtomically) {
   const std::string csv((std::istreambuf_iterator<char>(input)),
                         std::istreambuf_iterator<char>());
   const std::string expected =
-      "symbol,symbol_id,exchtime,localtime,high_limit,low_limit,last_price,"
-      "ask_price1,bid_price1,ask_price2,bid_price2,ask_price3,bid_price3,"
-      "ask_price4,bid_price4,ask_price5,bid_price5,open,total_trade,"
-      "total_volume,total_value,status,sequence\n"
-      "2330,-1,1783386000123456000,1783386000123456000,99.00,81.00,95.00,"
-      "95.10,94.90,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,95.00,10,"
-      "100,9500000.00,524434,123\n";
+      "symbol,market,exchange_ns,local_ns,disclosure,limit_state,"
+      "session_state,trade_side,trade_count,last_price,open,high,low,"
+      "trade_volume,total_volume,total_value,ask_price1,ask_volume1,"
+      "ask_price2,ask_volume2,ask_price3,ask_volume3,ask_price4,"
+      "ask_volume4,ask_price5,ask_volume5,bid_price1,bid_volume1,"
+      "bid_price2,bid_volume2,bid_price3,bid_volume3,bid_price4,"
+      "bid_volume4,bid_price5,bid_volume5,source_sequence\n"
+      "2330,1,1783386000123456000,1783386000123456000,146,0,8,0,1,"
+      "95.0000,95.0000,95.0000,95.0000,10,100,9500000.0000,"
+      "95.1000,30,0.0000,0,0.0000,0,0.0000,0,0.0000,0,"
+      "94.9000,20,0.0000,0,0.0000,0,0.0000,0,0.0000,0,123\n";
   EXPECT_EQ(csv, expected);
 
   std::ifstream basic_input(basic_output_path_, std::ios::binary);
@@ -111,6 +133,66 @@ TEST_F(DumpConverterTest, ConvertsDumpToOrderbookCsvAndPublishesAtomically) {
     EXPECT_EQ(entry.path().filename().string().find(".partial."),
               std::string::npos);
   }
+}
+
+TEST_F(DumpConverterTest, WritesOneAtomicRowForMultiTradeGroup) {
+  std::vector<std::uint8_t> dump;
+  const auto basic = test::MakeStockBasic("2330", 900000, 990000, 810000);
+  test::AppendMessage(dump, MessageType::kStockBasicInfo, basic, 1);
+
+  constexpr std::array<Level, 2> kPreBook{{
+      {.price = 949000, .volume = 20},
+      {.price = 950000, .volume = 30},
+  }};
+  const auto pre_book =
+      test::MakeDepth("2330", 90000000000, 0, false, 1, 1, kPreBook, 0x10U);
+  test::AppendMessage(dump, MessageType::kStockDepthV, pre_book, 10);
+
+  constexpr std::array<Level, 1> kFirstTrade{{
+      {.price = 951000, .volume = 2},
+  }};
+  const auto first_trade = test::MakeDepth("2330", 90000123456, 2, true, 0, 0,
+                                           kFirstTrade, 0x10U, 0, true);
+  test::AppendMessage(dump, MessageType::kStockDepthV, first_trade, 11);
+
+  constexpr std::array<Level, 3> kFinal{{
+      {.price = 952000, .volume = 3},
+      {.price = 948000, .volume = 25},
+      {.price = 953000, .volume = 35},
+  }};
+  const auto final =
+      test::MakeDepth("2330", 90000123456, 5, true, 1, 1, kFinal, 0x10U);
+  test::AppendMessage(dump, MessageType::kStockDepthV, final, 12);
+  test::WriteBinaryFile(dump_path_, dump);
+
+  const auto stats = ConvertDump(MakeOptions());
+
+  EXPECT_EQ(stats.rows_written, 2);
+  EXPECT_EQ(stats.source_actual_trade_payloads, 2);
+  EXPECT_EQ(stats.actual_trade_payloads, 2);
+  EXPECT_EQ(stats.match_groups, 1);
+  EXPECT_EQ(stats.multi_trade_groups, 1);
+  EXPECT_EQ(stats.trades_in_multi_groups, 2);
+  EXPECT_EQ(stats.buy_groups, 1);
+  EXPECT_TRUE(stats.incomplete_match_groups.empty());
+  EXPECT_TRUE(stats.value_imputations.empty());
+
+  std::ifstream input(output_path_);
+  std::string header;
+  std::string pre_book_row;
+  std::string match_group_row;
+  std::string extra;
+  ASSERT_TRUE(static_cast<bool>(std::getline(input, header)));
+  ASSERT_TRUE(static_cast<bool>(std::getline(input, pre_book_row)));
+  ASSERT_TRUE(static_cast<bool>(std::getline(input, match_group_row)));
+  EXPECT_FALSE(static_cast<bool>(std::getline(input, extra)));
+  const auto fields = SplitCsvLine(match_group_row);
+  ASSERT_EQ(fields.size(), 37);
+  EXPECT_EQ(fields[0], "2330");
+  EXPECT_EQ(fields[7], "1");
+  EXPECT_EQ(fields[8], "2");
+  EXPECT_EQ(fields[13], "5");
+  EXPECT_EQ(fields[36], "12");
 }
 
 TEST_F(DumpConverterTest, ConvertsTpexMessagesWithOtcBasicInfoLayout) {
@@ -136,8 +218,8 @@ TEST_F(DumpConverterTest, ConvertsTpexMessagesWithOtcBasicInfoLayout) {
   std::ifstream input(output_path_, std::ios::binary);
   const std::string csv((std::istreambuf_iterator<char>(input)),
                         std::istreambuf_iterator<char>());
-  EXPECT_NE(csv.find("6488,-1,1783386000000000000,1783386000000000000,"
-                     "55.00,45.00,51.00"),
+  EXPECT_NE(csv.find("6488,2,1783386000000000000,1783386000000000000,"
+                     "128,0,0,0,1,51.0000"),
             std::string::npos);
 }
 
@@ -331,8 +413,8 @@ TEST_F(DumpConverterTest, ResynchronizesAndContinuesWithUnaffectedSymbol) {
   const std::string orderbook_csv(
       (std::istreambuf_iterator<char>(orderbook_input)),
       std::istreambuf_iterator<char>());
-  EXPECT_EQ(orderbook_csv.find("2330,-1,"), std::string::npos);
-  EXPECT_NE(orderbook_csv.find("2317,-1,"), std::string::npos);
+  EXPECT_EQ(orderbook_csv.find("2330,1,"), std::string::npos);
+  EXPECT_NE(orderbook_csv.find("2317,1,"), std::string::npos);
 }
 
 TEST_F(DumpConverterTest, CycleCountMismatchPublishesBothOutputs) {
@@ -376,7 +458,8 @@ TEST_F(DumpConverterTest, MissingMultiplierSkipsSymbolAndPublishesBothHeaders) {
   const auto stats = ConvertDump(MakeOptions());
   EXPECT_EQ(stats.missing_multiplier_messages, 1);
   ASSERT_EQ(stats.missing_multiplier_symbols.size(), 1);
-  EXPECT_EQ(stats.missing_multiplier_symbols.front(), "2330");
+  EXPECT_EQ(stats.missing_multiplier_symbols.front().market, Market::kTwse);
+  EXPECT_EQ(stats.missing_multiplier_symbols.front().symbol, "2330");
   std::ifstream orderbook_input(output_path_, std::ios::binary);
   const std::string orderbook_csv(
       (std::istreambuf_iterator<char>(orderbook_input)),
@@ -406,7 +489,8 @@ TEST_F(DumpConverterTest,
 
   const auto stats = ConvertDump(MakeOptions());
   ASSERT_EQ(stats.missing_multiplier_symbols.size(), 1);
-  EXPECT_EQ(stats.missing_multiplier_symbols.front(), "2330");
+  EXPECT_EQ(stats.missing_multiplier_symbols.front().market, Market::kTwse);
+  EXPECT_EQ(stats.missing_multiplier_symbols.front().symbol, "2330");
   EXPECT_EQ(stats.invalidated_symbol_messages, 1);
 
   std::ifstream orderbook_input(output_path_, std::ios::binary);
@@ -457,7 +541,7 @@ TEST_F(DumpConverterTest, OverwritesOnlyWhenExplicitlyRequested) {
   std::ifstream input(output_path_);
   std::string header;
   std::getline(input, header);
-  EXPECT_TRUE(header.starts_with("symbol,symbol_id,exchtime"));
+  EXPECT_TRUE(header.starts_with("symbol,market,exchange_ns"));
   std::ifstream basic_input(basic_output_path_);
   std::string basic_header;
   std::getline(basic_input, basic_header);
@@ -557,5 +641,5 @@ TEST_F(DumpConverterTest, NeverReplacesAnOutputDirectory) {
   }
 }
 
-} // namespace
-} // namespace aries::data::twse
+}  // namespace
+}  // namespace aries::data::twse

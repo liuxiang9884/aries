@@ -6,11 +6,11 @@
 #include <string_view>
 #include <utility>
 
-#include "nova/utils/log.h"
 #include <CLI/CLI.hpp>
 
 #include "data/converter/twse/dump_converter.h"
 #include "data/converter/twse/message_decoder.h"
+#include "nova/utils/log.h"
 
 int main(int argc, char **argv) {
   nova::LogConfig log_config;
@@ -18,7 +18,9 @@ int main(int argc, char **argv) {
   log_config.set_console_sink_name("twse_dump_converter_console");
   nova::InitializeLogging(log_config);
   struct LoggingGuard {
-    ~LoggingGuard() { nova::StopLogging(); }
+    ~LoggingGuard() {
+      nova::StopLogging();
+    }
   } logging_guard;
 
   CLI::App app{
@@ -110,10 +112,38 @@ int main(int argc, char **argv) {
                                      : "unknown",
           issue.affected_symbol.value_or("unknown"), issue.error);
     }
-    for (const auto &symbol : stats.missing_multiplier_symbols) {
-      NOVA_WARNING("TWSE conversion issue: kind=missing_multiplier "
-                   "trading_day={} symbol={}",
-                   trading_day, symbol);
+    for (const auto &issue : stats.missing_multiplier_symbols) {
+      NOVA_WARNING(
+          "TWSE conversion issue: kind=missing_multiplier "
+          "trading_day={} market={} symbol={}",
+          trading_day, static_cast<unsigned>(issue.market), issue.symbol);
+    }
+    for (const auto &issue : stats.sequence_gaps) {
+      NOVA_WARNING(
+          "TWSE conversion issue: kind=sequence_gap trading_day={} "
+          "market={} format={} expected_sequence={} actual_sequence={}",
+          trading_day, static_cast<unsigned>(issue.market),
+          static_cast<unsigned>(issue.source_format), issue.expected_sequence,
+          issue.actual_sequence);
+    }
+    for (const auto &issue : stats.incomplete_match_groups) {
+      NOVA_WARNING(
+          "TWSE conversion issue: kind=incomplete_match_group "
+          "trading_day={} market={} symbol={} format={} first_sequence={} "
+          "last_sequence={} trade_count={} trade_volume={} reason={}",
+          issue.trading_day, static_cast<unsigned>(issue.market), issue.symbol,
+          static_cast<unsigned>(issue.source_format), issue.first_sequence,
+          issue.last_sequence, issue.trade_count, issue.trade_volume,
+          aries::data::twse::ToString(issue.reason));
+    }
+    for (const auto &issue : stats.value_imputations) {
+      NOVA_WARNING(
+          "TWSE conversion issue: kind=missing_trade_volume "
+          "trading_day={} market={} symbol={} sequence={} volume_diff={} "
+          "observed_volume={} missing_volume={} imputation_price={:.4f}",
+          trading_day, static_cast<unsigned>(issue.market), issue.symbol,
+          issue.source_sequence, issue.volume_difference, issue.observed_volume,
+          issue.missing_volume, issue.price);
     }
     const std::string_view result_status =
         dry_run
@@ -122,18 +152,29 @@ int main(int argc, char **argv) {
             : (stats.has_issues() ? std::string_view{"published_partial"}
                                   : std::string_view{"published_complete"});
     NOVA_INFO(
-        "TWSE conversion complete: status={} mode={} messages={} "
-        "orderbook_rows={} "
+        "TWSE conversion complete: status={} schema=twse-orderbook-v2 "
+        "local_time_source=exchange_fallback mode={} messages={} "
+        "orderbook_rows={} source_actual_trades={} actual_trades={} "
+        "match_groups={} multi_trade_groups={} trades_in_multi_groups={} "
+        "held_ended_groups={} "
+        "buy_groups={} sell_groups={} unknown_groups={} "
         "orderbook_symbols={} basic_messages={} basic_controls={} "
         "basic_duplicates={} basic_rows={} cycle_mismatches={} "
-        "frame_errors={} missing_multiplier_messages={} "
+        "frame_errors={} sequence_gaps={} incomplete_groups={} "
+        "value_imputations={} missing_multiplier_messages={} "
         "invalidated_symbol_messages={} bytes={} dry_run={}",
         result_status, aries::data::twse::ToString(mode), stats.messages_read,
-        stats.rows_written, stats.symbols_seen, stats.basic_info_messages,
+        stats.rows_written, stats.source_actual_trade_payloads,
+        stats.actual_trade_payloads, stats.match_groups,
+        stats.multi_trade_groups, stats.trades_in_multi_groups,
+        stats.held_ended_groups, stats.buy_groups, stats.sell_groups,
+        stats.unknown_groups, stats.symbols_seen, stats.basic_info_messages,
         stats.basic_info_controls, stats.basic_info_duplicates,
         stats.basic_info_rows, stats.basic_info_cycle_mismatches.size(),
-        stats.frame_recovery_issues.size(), stats.missing_multiplier_messages,
-        stats.invalidated_symbol_messages, stats.bytes_read, dry_run);
+        stats.frame_recovery_issues.size(), stats.sequence_gaps.size(),
+        stats.incomplete_match_groups.size(), stats.value_imputations.size(),
+        stats.missing_multiplier_messages, stats.invalidated_symbol_messages,
+        stats.bytes_read, dry_run);
     return 0;
   } catch (const std::exception &error) {
     NOVA_ERROR("TWSE conversion failed: {}", error.what());
