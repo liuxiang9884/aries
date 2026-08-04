@@ -1,6 +1,6 @@
 # Aries 全局 Onboarding
 
-更新时间：2026-08-01
+更新时间：2026-08-04
 
 ## 项目职责
 
@@ -11,9 +11,10 @@
 
 - 根 CMake、preset 和 vcpkg manifest 已提供统一的 configure、build 与 CTest
   入口。
-- 数据模块已具备台湾 raw 数据下载工具；TWSE / TPEx converter 可生成
-  Orion-compatible depth 与 format1 basic-info CSV；TAIFEX converter 可同步生成
-  全 futures research depth 与 basic-info CSV，且已完成 2026-07-07 真实数据验证。
+- 数据模块已具备台湾 raw 数据下载工具；TWSE / TPEx converter 已实现 37 列
+  `twse-orderbook-v2` 原子撮合组 Orderbook 与 30 列 format1 basic-info CSV，并完成
+  2026-07-07 全日真实验证。TAIFEX converter 可同步生成 futures research orderbook 与
+  basic-info CSV，且已完成同日真实数据验证。
 - 回测模块已完成 `hftbacktest` 外部参考调研，正在准备首次架构设计，尚无正式行为
   contract 或实现；因子、模型和研究模块目前仍只有目录骨架。
 - 大体积 raw、CSV、临时转换结果和实验产物均保存在仓库外。
@@ -51,13 +52,15 @@ VCPKG_ROOT=/home/liuxiang/vcpkg ctest --preset debug
 ## 当前主线
 
 当前最具体模块是 `data/converter`。新对话在读取本文件后，直接读取
-`data/converter/docs/onboarding.md`，不默认读取其他模块 onboarding。`backtest`
-已完成外部参考调研，首次架构设计仍待启动。
+`data/converter/docs/onboarding.md`，不默认读取其他模块 onboarding。当前主线是完成
+TWSE v2 合并与历史 CSV 重建；`backtest` 已完成外部参考调研，首次架构设计仍待启动。
 
 ## 下一步
 
-建立数据 manifest/version contract，并继续讨论 TAIFEX 缺口数据的下游使用规则。
-TAIFEX reader 在第一条 `13:46:00` 消息处停止，只发布统一日盘窗口；夜盘支持暂缓。
+合并已完成验证的 TWSE v2 实现后，使用带 converter hash、schema/每日质量日志的 runner 重建
+`/tw_backup/data/tw/csv/stock/`。之后建立数据 manifest/version contract，并继续讨论
+TAIFEX 缺口数据的下游使用规则。TAIFEX reader 在第一条 `13:46:00` 消息处停止，只发布
+统一日盘窗口；夜盘支持暂缓。
 
 回测工作恢复时，以 `backtest/docs/hftbacktest-reference.md` 为事实基线开展首次架构设计。
 

@@ -1,6 +1,6 @@
 # Data 模块 Onboarding
 
-更新时间：2026-08-01
+更新时间：2026-08-04
 
 ## 模块职责
 
@@ -9,10 +9,12 @@
 ## 当前状态
 
 - 台湾 raw 数据通过 `scripts/` 下载到仓库外目录，支持断点续传和 cron 调度。
-- 2026-07-07 TAIFEX 与 TWSE dump 已由 Orion 转换为 legacy CSV 并记录校验摘要。
-- Aries 已实现 TWSE / TPEx converter 的 legacy depth/basic-info contract，以及
-  TAIFEX 全 futures 44 列 depth 与 27 列 basic-info research schema；尚未建立统一
-  manifest、跨市场 schema version 或夜盘交易日历 contract。
+- 2026-07-07 TAIFEX 与 TWSE dump 保留 Orion legacy CSV 校验摘要，仅用于历史对照。
+- Aries 已实现 TWSE / TPEx 37 列 `twse-orderbook-v2` 和 30 列
+  format1 basic-info contract，并通过 2026-07-07 全日真实数据验证。TAIFEX 当前为全
+  futures 44 列 orderbook 与 27 列 basic-info research schema。
+- `/tw_backup` 已有股票 CSV 在 v2 历史重建前仍可能是 23 列 legacy；尚未建立
+  统一 manifest、跨市场 schema version 或夜盘交易日历 contract。
 
 ## 关键入口
 
@@ -25,7 +27,8 @@
 ## 重要边界 / Contract
 
 - raw、dump、CSV 和后续研究数据的时间、单位、来源与版本必须显式记录。
-- 当前 CSV 是 Orion 兼容输出，不是正式版本化研究数据集。
+- TWSE 以 `twse-orderbook-v2` exact header 为当前代码 contract；不提供 23 列
+  legacy writer/reader 或双写。正式研究数据集仍需建立 manifest 与 schema version。
 - 数据和大体积转换结果不进入 git；仓库只跟踪代码、schema、manifest 和校验摘要。
 
 ## 验证命令
@@ -39,8 +42,10 @@
 
 ## 下一步
 
-统一 raw、dump、CSV 与后续研究数据的目录和版本规则并建立第一版 manifest。
-TAIFEX reader 在第一条 `13:46:00` 消息处停止，只发布统一日盘窗口；夜盘支持暂缓。
+先在 TWSE v2 实现合并后重建 `/tw_backup/data/tw/csv/stock/`，通过 exact
+header 、每日 summary 和问题日志验收；再统一 raw、dump、CSV 与后续研究数据的目录/
+版本规则并建立第一版 manifest。TAIFEX reader 在第一条 `13:46:00` 消息处停止，
+只发布统一日盘窗口；夜盘支持暂缓。
 
 ## 按需阅读
 

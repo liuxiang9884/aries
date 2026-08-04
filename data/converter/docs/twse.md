@@ -1,6 +1,6 @@
 # TWSE / TPEx Dump Converter 设计与 Orion 差异
 
-更新时间：2026-08-01
+更新时间：2026-08-04
 
 ## 事实源与范围
 
@@ -16,10 +16,9 @@
 dump 到 CSV 的独立工具，不提取 Orion 的 multicast、replay、SHM、symbol
 pool 或 binary data file 路径。
 
-股票专属 `Orderbook<N>` 的逐字段审查、typed status、actual/trial、trade-only、
-五档 volume、OHLC 和独立 `Trade` 建议见 `data/converter/docs/twse_orderbook.md`。
-该文档描述尚未实现的下一版研究 schema；本文仍是当前 converter 行为与 23/30 列
-CSV contract 的事实源。
+股票 normalized `Orderbook<N>`、typed state、原子 match group、方向、OHLC/value 与
+37 列 `twse-orderbook-v2` contract 见 `data/converter/docs/twse_orderbook.md`。本文负责
+wire protocol、basic-info、filter、恢复、发布及相对 Orion 的边界，不复制逐字段 schema。
 
 ## 协议核对结果
 
@@ -111,8 +110,9 @@ filter mode 语义不变。
 
 format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
 5-byte price 加 6-byte volume。即时行情顺序均为成交、bid 一至五档、ask
-一至五档。`data_flag`、`limit_flag`、`status` 按三个原始 byte 组合成 CSV
-的整数 `status`，与 Orion x86 输出一致，但不依赖 C++ bitfield 排列。
+一至五档。`data_flag`、`limit_flag`、`status` 分别保存为
+`DisclosureState`、`LimitState`、`SessionState` 的原始 byte，并分别输出 CSV 数值；
+accessor 使用显式 mask/shift，不依赖 C++ bitfield 排列。
 
 ## 与 Orion 保持一致的行为
 
@@ -125,10 +125,10 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
 - warrant symbol 除 Orion 代码形态外，也可由先到达的 format1 权证元数据识别。
 - `all` mode 对所有 symbol 的 format 6 写 CSV，但不会写 format 17；这是
   Orion 当前 mode 语义，不把 `all` 解释为所有 format。
-- 每个 symbol 维护 previous close、涨跌停、open、last 和累计 volume。
-- orderbook CSV 为 23 列，不包含 bid / ask volume；price 和 `total_value` 保留
-  两位小数。
-- offline `symbol_id = -1`，`localtime = exchtime`。
+- 保留 Orion 五种 mode 的 symbol/source 选择语义；normalized record、事件边界和 CSV
+  schema 不再兼容 Orion。
+- offline `local_ns = exchange_ns`，并在完成日志写
+  `local_time_source=exchange_fallback`。
 
 ## 有意不同于 Orion 的行为
 
@@ -148,18 +148,21 @@ format 6 / 17 每档为 5-byte price 加 4-byte volume；format 23 每档为
 | format1 输出 | 只更新 orderbook 内部状态 | 另生成 30 列、去重且排序的 basic-info CSV | 保留可研究的证券与权证基础资料 |
 | format1 控制 | `AL` / `NE` 可能成为 pseudo symbol | 识别控制记录，并在首轮同步后校验每个完整周期数量；mismatch 记录后继续 | 防止计数记录污染证券状态，检测并显式暴露丢包，同时保留其余可信数据 |
 | format1 重复 | 同 symbol 后到状态覆盖 | 相同记录去重；字段变化即失败并报告 diff | format1 无安全的 last-wins 时间语义 |
+| 撮合事件 | 每条 wire message 直接输出，trade-only 可能形成 stale/empty depth | format 6/17 按 `(market,symbol)` 缓冲，同一 incoming order 只在 final book 或 held terminal 发布一条原子 Orderbook | 避免把一笔已发生事件拆成多次策略回调，也不提前泄漏 final book |
+| 股票 Trade | 没有独立 normalized Trade contract | 不增加独立 Trade CSV；terminal Orderbook 保存 `trade_side/trade_count/trade_volume` | 下游直接消费完整撮合组；协议没有 order id |
+| record/schema | `std::string`、packed status、静态价格重复、23 列且不含盘口量 | POD-like `char[16]`、三个 typed raw state、内部 dense `symbol_id`、37 列且包含全部五档量/OHLC/group trade | 面向研究和同步实盘的明确 contract；不保留 legacy writer |
 | `total_value` | `delta_volume * last_price`，未乘交易单位 | 一般交易累计 `delta_volume * last_price * multiplier`；odd-lot 的 wire volume 已是实际证券数量，有效乘数为 1 | 统一为实际币种成交额；orderbook CSV 不再与 Orion byte-compatible |
 | CLI 日志 | 工具原有输出方式 | outer CLI 使用 Nova `INFO` / `WARNING` / `ERROR`；core 返回结构化质量统计或通过异常传递全局错误 | 每个 recoverable issue 和最终 publication status 都可由 runner 收集 |
 
-2026-07-07 的旧验证曾证明修改前 orderbook CSV 与 Orion bytes 完全一致；该 hash 只
-作为历史基线。自 2026-08-01 起 `total_value` 纳入 format1 `multiplier`，因此新
-orderbook CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不变。
+2026-07-07 的旧验证曾证明 23 列 legacy orderbook CSV 与 Orion bytes 完全一致；该
+hash 现在只用于识别迁移前文件。`twse-orderbook-v2` 是一次不兼容 schema migration，
+没有 legacy writer、双写开关或兼容 reader。
 
-`total_value` 不是交易所直接提供的字段。一般交易按相邻消息累计量差、当前成交价
-和 format1 multiplier 计算，币种来自 basic-info `currency`；若成交量变化前尚未
-收到 multiplier metadata，不伪造乘数或成交额，该 symbol 从此不再输出 orderbook，
-并在日志中记录 `missing_multiplier`。format 23 odd-lot 的 volume 已经是实际证券
-数量，因此不再乘标准交易单位。
+`total_value` 不是交易所直接提供的字段。converter 在 accepted cumulative volume
+checkpoint 之间按每一笔已收到的实际成交价累计；若 terminal 累计量差大于 observed
+trade volume，只对缺失部分使用 `last_price`，并写 `missing_trade_volume` 日志。
+一般交易使用 format1 multiplier；format 23 odd-lot 的有效乘数为 1。详细公式见
+`twse_orderbook.md`。
 
 ## Best-effort 恢复与发布 contract
 
@@ -171,8 +174,9 @@ orderbook CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不
 - 如果损坏 frame 的 body 能提供可打印的 symbol，converter 将该 symbol 标记为
   invalidated，重同步后不再输出它的 orderbook。这样不会用跨缺口的累计 volume 和未知
   成交价继续计算错误的 `total_value`；其他 symbol 继续转换。
-- format1 cycle mismatch、局部 frame recovery 和 missing multiplier 都是可恢复质量
-  问题，最终状态为 `published_partial`。没有上述问题时为 `published_complete`。
+- format1 cycle mismatch、局部 frame recovery、missing multiplier、source sequence
+  gap、incomplete match group 和 missing-volume imputation 都是可恢复质量问题，最终
+  状态为 `published_partial`。没有上述问题时为 `published_complete`。
 - 如果非空 dump 中连一条通过 frame 校验并成功处理的消息都没有，不发布只有 header
   的新文件。format1 同主键字段冲突等无法安全决定状态的语义错误仍使转换失败，并
   保留既有成对输出。
@@ -188,8 +192,12 @@ orderbook CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不
 - format 6 / 17 / 22 / 23、五种 mode、checksum、trailer、截断、超过五档、
   有界重同步、受影响 symbol 隔离、缺失 multiplier、双文件 best-effort 发布、
   原子发布和 symlink 边界均有 focused tests。
-- 2026-07-07 stock dump 含 listed 与 OTC stream，严格 checksum / version /
-  service 校验下可完整读取 25,993,761 条消息并生成 15,886,026 条数据行。
+- 2026-07-07 stock dump 含 listed 与 OTC stream，严格 checksum/version/service 校验下
+  可完整读取 25,993,761 条消息。`all --dry-run` 得到 2,312,789 个 actual trade
+  payload、2,254,614 个 match group、45,270 个 multi-trade group、103,445 个
+  multi-group 内成交和 78 个 held-ended group，gap/incomplete/imputation 均为 0。
+- 同一输入的 `stock` v2 完整输出为 15,548,031 个数据行、37 列、3,705,213,634 bytes；
+  逐行独立扫描无列错位、累计量额回退、sequence 回退或 held stale book。
 - 同一 dump 含 1,145,472 条 format1 正常记录与 167 条控制记录；去除
   1,104,631 条完全相同的重复后得到 40,841 个唯一主键，未发现字段变化冲突。
 - basic-info CSV 为 5,118,361 bytes、40,841 个数据行、30 列，SHA-256 为
@@ -197,15 +205,13 @@ orderbook CSV 与 Orion 不再 byte-compatible，其他 22 列的既有语义不
   其中 TWSE 30,488 行、TPEx 10,353 行。
 - 该 dump 没有可供 `odd_lot` format23 / `warrant` format17 orderbook 输出的真实
   消息；这两个 orderbook 输出路径目前仍由 synthetic fixture 覆盖。
-- 当前 orderbook CSV 丢弃五档 volume。包含 volume 的正式研究 schema 需要单独设计、
-  版本化和迁移，不能直接修改现有 23 列输出。
 
 ## 输出实现边界
 
 - orderbook 与 basic-info 都使用
   `quill::CsvWriter<Schema, nova::LogManager::NovaFrontendOptions>`；header 与 format
   由 compile-time schema 固定，typed field 通过 `append_row()` 进入 Nova 管理的
-  Quill backend。本次迁移保持当前 23/30 列、字段语义和数值格式不变。
+  Quill backend。股票 orderbook 为 37 列 v2，basic-info 保持 30 列且真实日 hash 不变。
 - writer 只打开同目录 `.partial.<pid>`；发布前依次执行 blocking `flush()`、销毁
   Quill writer 并确认 partial 是非空 regular file，确保 backend 不再持有输出文件后
   才进入 rename。

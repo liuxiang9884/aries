@@ -2,7 +2,13 @@
 
 日期：2026-08-04
 
-状态：待实施
+状态：实现与单日真实验证完成；历史 `/tw_backup` v2 重建待合并后执行
+
+实施结果：代码、focused/full/sanitizer tests、37 列 Quill CSV、结构化质量日志和
+专题文档已完成；2026-07-07 `all --dry-run` 与独立基线一致，`stock`
+完整 CSV 已逐行验证。详细结果见
+`data/converter/docs/twse_orderbook.md` 与 `data/converter/docs/testing.md`。
+实现提交为 `5087703`。
 
 ## 目标
 
@@ -153,8 +159,9 @@ pending match group 和 basic-info reference 分离。不得继续把 emitted `O
 | trial | 任意 | 不更新 actual state；不改变或发布 pending actual group | 不发布 |
 | 其他 symbol 消息 | 任意 | 只处理其自身 state；不关闭当前 symbol group | 按该 symbol 规则 |
 
-format 6/17 group 的所有 actual trade 必须具有相同 `exchange_ns`。若同一 symbol 在 terminal
-前出现不同撮合时间、无法解释的 actual/session 状态、sequence gap 或 EOF：
+format 6/17 group 的所有 actual trade 必须具有相同 source format 和
+`exchange_ns`。若同一 symbol 在 terminal 前出现不同 source format、不同撮合时间、
+无法解释的 actual/session 状态、sequence gap 或 EOF：
 
 1. 记录 `incomplete_match_group`，包括 day、market、symbol、first/last/observed sequence、
    trade count/volume 和原因；
@@ -174,14 +181,15 @@ book-only 或 final-book event 才恢复 valid；在此之前实盘 consumer 不
 方向不是交易所直接字段，必须允许 `unknown`。推断只使用 event 发布时已经可得的信息：
 
 1. group 开始前保存最后一个 valid、完整的 pre-match N 档。
-2. 仅在 normal continuous matching、非 opening/closing/trial/held、无 gap 且 best bid/ask
-   均可判定时推断。
+2. 仅在 normal continuous matching、非 opening/closing/trial、无 gap 且 best bid/ask
+   均可判定时推断；terminal held 状态本身不否定此前 actual group 的方向。
 3. 第一笔 actual price 只能对应或穿过 pre-match ask 时为 `buy`；只能对应或穿过 pre-match
    bid 时为 `sell`；locked/crossed、market-price level、两侧均可能、两侧均不匹配或缺少
    五档时为 `unknown`。
 4. 同一 group 的全部价量共享一个 side；后续 trade 分片不得把一个 group 拆成多个方向。
 5. terminal final book 只用于一致性检查；不得用无法唯一解释的 book delta 强行制造方向。
-6. held-ended group 仍可使用 pre-match book 推断；没有 valid pre-match book 时保持 unknown。
+6. held payload 本身不参与方向推断；held-ended group 仍可使用 pre-match book 与此前
+   actual trade path 推断。没有 valid pre-match book 时保持 unknown。
 7. Orderbook 只在 terminal 到达后发布，因此不需要 `match_group_id` 或
    `side_available_sequence`，也不会把终局信息回填到已发布的早期行。
 
@@ -199,9 +207,10 @@ book-only 或 final-book event 才恢复 valid；在此之前实盘 consumer 不
 ```text
 trade_count = actual trade payload count
 trade_volume = sum(actual trade payload volume)
-observed_value = sum(price * volume * effective_multiplier)
+observed_volume = sum(actual trade volume since previous checkpoint)
+observed_value = sum(actual price * volume * effective_multiplier since previous checkpoint)
 volume_diff = terminal_total_volume - previous_accepted_total_volume
-missing_volume = volume_diff - trade_volume
+missing_volume = volume_diff - observed_volume
 total_value += observed_value
              + missing_volume * last_price * effective_multiplier
 ```
@@ -299,7 +308,7 @@ total_value += observed_value
    或半文件。
 4. runner 继续使用同一路径与 `--overwrite`；converter 完成日志记录
    `schema=twse-orderbook-v2`、mode 和 `local_time_source=exchange_fallback`；运行交接摘要
-   记录实际使用的 converter commit。
+   记录实际使用的 converter binary SHA-256。
 
 ### 阶段 5：文档与 migration
 
