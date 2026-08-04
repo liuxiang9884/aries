@@ -341,6 +341,23 @@ TWSE 历史重建采用 `data/converter/scripts/rebuild_twse_csv`，raw dump 保
 输出，因此该 symbol 的当日文件只包含损坏前的可信前缀；研究时必须结合逐日日志和
 publication status 使用。
 
+### 2026-08-04 TWSE v2 最近五日重建
+
+`main` Release converter 对 2026-07-30 至 2026-08-03 五个自然日执行重建。
+7 月 30/31 日和 8 月 3 日的 orderbook/basic-info 已成对发布到
+`/tw_backup/data/tw/csv/stock/`；8 月 1/2 日无 raw/archive，未生成空文件。
+
+| 日期 | publication | orderbook 行 | orderbook bytes | basic-info 行 | gap | imputation | cycle mismatch |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 2026-07-30 | `published_partial` | 19,055,457 | 4,515,710,410 | 42,209 | 222 | 99 | 1 |
+| 2026-07-31 | `published_partial` | 9,759,236 | 2,295,714,892 | 42,010 | 46 | 15 | 0 |
+| 2026-08-03 | `published_partial` | 11,652,668 | 2,762,822,991 | 41,963 | 61 | 17 | 1 |
+
+三天 exact header 均为 `twse-orderbook-v2`，独立行数与 converter summary 一致，
+frame error/incomplete group/missing multiplier 均为 0。完整 output SHA-256、converter
+binary hash 和逐日 log 位于
+`/home/liuxiang/tmp/twse-v2-last5-20260804/final_summary.tsv`。
+
 ## 未完成事项
 
 - 为 raw、dump、csv、后续 parquet / binary 研究数据确定统一目录约定，避免 `/data/tw/raw` 与 `/home/liuxiang/data/raw` 长期并存而语义不清。

@@ -15,6 +15,8 @@
   futures 44 列 orderbook 与 27 列 basic-info research schema。
 - `/tw_backup` 已有股票 CSV 在 v2 历史重建前仍可能是 23 列 legacy；尚未建立
   统一 manifest、跨市场 schema version 或夜盘交易日历 contract。
+- v2 已合并到 `main`；2026-07-30/31 和 2026-08-03 已发布 37 列 CSV，
+  2026-08-01/02 无输入。三个交易日均含需要后续审查的可恢复质量问题。
 
 ## 关键入口
 
@@ -42,8 +44,8 @@
 
 ## 下一步
 
-先在 TWSE v2 实现合并后重建 `/tw_backup/data/tw/csv/stock/`，通过 exact
-header 、每日 summary 和问题日志验收；再统一 raw、dump、CSV 与后续研究数据的目录/
+先审查首批 TWSE v2 的逐日 sequence gap、value imputation 与 cycle mismatch，
+再决定更早历史日期的重建范围；之后统一 raw、dump、CSV 与后续研究数据的目录/
 版本规则并建立第一版 manifest。TAIFEX reader 在第一条 `13:46:00` 消息处停止，
 只发布统一日盘窗口；夜盘支持暂缓。
 

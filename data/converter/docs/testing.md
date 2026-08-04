@@ -88,6 +88,33 @@ data/converter/scripts/rebuild_twse_csv \
 的日期记为 `non_trading_day`；其他零字节输入保守记为 `empty_input`。损坏归档记为
 `input_corrupt`，不覆盖已有 CSV，批处理继续下一日。
 
+### 2026-08-04 最近五个自然日重建
+
+用 `main` 的 Release converter 处理 2026-07-30 至 2026-08-03。converter binary
+SHA-256 为
+`b7ae6db23df5f789f39567c77a88920ba4fdecc40b2d6e6aab23a4c4adf72859`。
+
+| 日期 | 结果 | Orderbook 行 | bytes | sequence gap | value imputation | cycle mismatch |
+|---|---|---:|---:|---:|---:|---:|
+| 2026-07-30 | `published_partial` | 19,055,457 | 4,515,710,410 | 222 | 99 | 1 |
+| 2026-07-31 | `published_partial` | 9,759,236 | 2,295,714,892 | 46 | 15 | 0 |
+| 2026-08-01 | `missing_input` | 0 | 0 | 0 | 0 | 0 |
+| 2026-08-02 | `missing_input` | 0 | 0 | 0 | 0 | 0 |
+| 2026-08-03 | `published_partial` | 11,652,668 | 2,762,822,991 | 61 | 17 | 1 |
+
+三个交易日均为 `twse-orderbook-v2` exact header，独立 `wc -l` 与 converter
+summary 严格一致；frame error、incomplete group、missing multiplier 均为 0。
+2026-08-01/02 没有 raw dump 或 archive，因此未生成空 CSV。六个已发布文件的
+SHA-256、basic-info 行数与逐日日志见：
+
+```text
+/home/liuxiang/tmp/twse-v2-last5-20260804/final_summary.tsv
+```
+
+2026-07-30 原有 dump 为 `0600`，受 NFS 身份映射影响无法读取。旧文件已保留为
+`twse_stock_20260730.dump.unreadable-20260804T1315`；从同日已通过 `gzip -t`
+的 archive 重新解压出 4,057,158,258-byte、`0664` dump 后转换成功。
+
 ## 历史 Orion 基线与 v2 验证
 
 完整转换结果写入 `/home/liuxiang/tmp`，同时指定两份输出：

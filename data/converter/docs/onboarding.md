@@ -33,6 +33,10 @@
   multi groups、78 held-ended groups，gap/incomplete/imputation 均为 0。`stock` 完整
   CSV 为 15,548,031 行、3,705,213,634 bytes。`/tw_backup` 既有历史股票 CSV 在重建前
   仍可能是 23 列 legacy，必须按 exact header 判断。
+- v2 已 fast-forward 合并到 `main`。2026-08-04 已重建前五个自然日：
+  2026-07-30/31 与 2026-08-03 均发布 37 列 `published_partial`；2026-08-01/02
+  无输入。每日 gap/imputation/cycle 和六个输出 hash 已记入验证文档/
+  `/home/liuxiang/tmp/twse-v2-last5-20260804/final_summary.tsv`。
 - 期货设计明确 I024 一项一条 Trade、
   `MATCH-TIME` / `INFORMATION-TIME` 分离、actual/trial book 分离，以及普通/
   derived/statistics 分表。
@@ -100,16 +104,14 @@ git diff --check
 
 ## 当前主线
 
-TWSE / TPEx `twse-orderbook-v2` 实现、review、单日真实验证、完整 CTest 和
-sanitizer 已在 `feature/twse-atomic-orderbook` 完成，待合并。TAIFEX 保持当前独立
-schema。历史 raw dump 与 archive 均保留。
+TWSE / TPEx `twse-orderbook-v2` 已合并到 `main`，并完成最近五个自然日的
+首批重建和问题记录。TAIFEX 保持当前独立 schema。历史 raw dump 与 archive
+均保留。
 
 ## 下一步
 
-合并股票 v2 后，使用更新后的 runner 从 raw 重建
-`/tw_backup/data/tw/csv/stock/`；summary 必须记录 schema、每日日志和 orderbook/basic
-bytes，并同时核对 converter SHA-256/完成日志声明与文件 exact header；
-全部日期完成后统一审查问题。
+先按日审查首批 v2 的 sequence gap、missing-volume imputation 和两个 format1
+cycle mismatch，确认对研究数据的使用边界；再决定是否继续重建更早的股票历史日期。
 之后再恢复 TAIFEX 下一版 schema 工作。
 
 ## 按需阅读
