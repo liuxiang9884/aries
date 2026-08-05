@@ -37,9 +37,11 @@
   2026-07-30/31 与 2026-08-03 均发布 37 列 `published_partial`；2026-08-01/02
   无输入。每日 gap/imputation/cycle 和六个输出 hash 已记入验证文档/
   `/home/liuxiang/tmp/twse-v2-last5-20260804/final_summary.tsv`。
-- 期货设计明确 I024 一项一条 Trade、
-  `MATCH-TIME` / `INFORMATION-TIME` 分离、actual/trial book 分离，以及普通/
-  derived/statistics 分表。
+- TAIFEX 下一版字段设计已按官方 V1.5.1、Orion、Aries 与 2026-08-03 全日真实 dump
+  四方核对：I024 一项一条 `Trade`，packet summary 进入 `TradePacket`；普通
+  `Orderbook<N>`、`DerivedOrderbook<1>`、I030 order stats、I140 status 与 I070-I073
+  session statistics 分表。设计尚未实现，逐字段建议以
+  `data/docs/converter/taifex_orderbook_trade.md` 为准。
 
 ## 关键入口
 
@@ -66,9 +68,10 @@
 - 股票 23 列 CSV 只是 legacy generation；代码不提供兼容 writer/reader，也不双写。
 - basic-info CSV 的主键、列顺序、空值、单位和 format1 重复处理以
   `data/docs/converter/twse.md` 为事实源；Big5/CP950 名称不解析、不输出。
-- 交易日按 UTC+8 自然日零点解释；offline `local_ns = exchange_ns` 并写
-  `local_time_source=exchange_fallback`。股票内部使用单次运行 dense `symbol_id`，不输出
-  CSV；期货仍使用当前独立 contract。
+- 交易日按当前日盘 UTC+8 自然日解释；股票 offline `local_ns = exchange_ns`。下一版
+  TAIFEX Trade 的 `exchange_ns=MATCH-TIME`，offline `local_ns` 应 fallback 到 header
+  `INFORMATION-TIME`，并由 manifest 记录来源。股票与下一版期货 C++ record 都保留
+  单次运行 dense `symbol_id`，但不输出 CSV。夜盘启用前必须另行锁定 trading-day mapping。
 - format 6/17 trade-only 不发布；normal final 与 held terminal 各发布一条原子
   Orderbook。held 行盘口全 0，下一条完整 book 才恢复 valid。
 - 股票 sequence 按 `(trading_day, market, source format)` 审计；group state 按
@@ -85,7 +88,9 @@
   可识别的受损 symbol 后续不再输出，避免错误延续累计 `total_value`。具体状态和日志
   contract 以 `data/docs/converter/twse.md` 为准。
 - 所有有意偏离 Orion 的行为必须记录在对应 exchange 专题文档并有 focused test。
-- TAIFEX 的 `total_value = abs(price) * contracts * multiplier`，累计值非负。
+- TAIFEX 的 `total_value = abs(price) * contracts * multiplier`，累计值非负；下一版放在
+  `TradePacket`，无 gap 时按真实 item 累计，只有 exchange cumulative volume 证明缺失的
+  volume 才按 last actual price 补值并写 quality summary。
 - TAIFEX metadata/gap/cache 问题不阻止其余合约发布，必须从每日日志审查 symbol、
   消息类型、sequence 和恢复状态；当前 orderbook CSV 不含逐行质量 flag。
 - 当前 TAIFEX 正式 contract 仅支持统一日盘窗口：保留盘前消息及
@@ -104,15 +109,16 @@ git diff --check
 
 ## 当前主线
 
-TWSE / TPEx `twse-orderbook-v2` 已合并到 `main`，并完成最近五个自然日的
-首批重建和问题记录。TAIFEX 保持当前独立 schema。历史 raw dump 与 archive
-均保留。
+TWSE / TPEx `twse-orderbook-v2` 已合并到 `main`，并完成最近五个自然日的首批重建和
+问题记录。当前设计主线转到 TAIFEX futures 逐笔 schema；字段文档已完成四方核对，当前
+converter 与历史 CSV 尚未迁移。历史 raw dump 与 archive 均保留。
 
 ## 下一步
 
-先按日审查首批 v2 的 sequence gap、missing-volume imputation 和两个 format1
-cycle mismatch，确认对研究数据的使用边界；再决定是否继续重建更早的股票历史日期。
-之后再恢复 TAIFEX 下一版 schema 工作。
+先逐项 review `taifex_orderbook_trade.md` 中 P0 `Orderbook<N>`、`Trade`、`TradePacket`
+字段和“盘口不重复成交状态”的边界；确认后再建立独立 L3 schema migration 计划与 fixture。
+股票首批 v2 的 sequence gap、missing-volume imputation 和两个 format1 cycle mismatch
+仍待按日审查，但不阻塞本轮期货字段讨论。
 
 ## 按需阅读
 

@@ -1,567 +1,710 @@
-# TAIFEX Futures Orderbook / Trade 字段设计
+# TAIFEX Futures 逐笔行情字段设计
 
-更新时间：2026-08-02
+更新时间：2026-08-05
 
-状态：**设计建议，尚未实现**。当前转换行为仍以
-`data/docs/converter/taifex.md` 记录的 44 列 orderbook CSV 与 27 列 basic-info
-CSV 为准。本文是后续 TAIFEX futures 专属 `Orderbook<N>` 与 `Trade` schema review
-的事实源，不描述当前已发布的数据版本。
+状态：**字段设计建议，尚未实现**。当前 converter 与已发布 CSV 仍以
+`taifex.md` 记录的 44 列 orderbook、27 列 basic-info 为准。本文是下一版 TAIFEX
+futures 逐笔 record、CSV schema 和状态边界的唯一设计事实源；实现前还需与用户逐项确认。
 
 ## 结论
 
-TAIFEX 与 TWSE / TPEx 应继续使用 exchange namespace 下的独立 record。二者统一
-`exchange_ns` / `local_ns`、价格 `double`、数量 `int64_t`、Nova + Quill writer 和
-manifest 规则，但不建立字段并集或公共数据基类。
+TAIFEX 不应复制股票“成交组与 terminal 五档合并为一条 Orderbook”的设计。官方协议中：
 
-TAIFEX 当前 struct 仍需要拆分。它把普通五档、衍生一档、actual 累计成交状态、trial
-状态、I024 packet summary、I081 action、static reference 和 recovery quality 混在一行。
-建议收敛为：
+- I024 是独立成交 packet，一项 price/quantity 对应一条 `Trade`；
+- I081 是普通/衍生盘口增量，I083 是完整盘口 snapshot；
+- I024/I025/I081/I083 共用 per-product `PROD-MSG-SEQ`，可按 sequence 确定性合并；
+- I030 委托统计、I140 状态、I070-I073 session statistics 都是独立事实，不属于五档。
 
-- `Orderbook<N>`：普通 N 档 actual 或 trial book，以及截至该行的 actual 成交状态；
-- `Trade`：I024 每一项成交/试撮价量，一项一行；
-- `DerivedOrderbook<1>`：TAIFEX 衍生一档；
-- `TradeStats`：I024 packet-level 累计成交笔数与 exchange summary；
-- 按需增加 `OrderbookDelta`、`OrderStats`、`HighLow` 和 session/daily statistics。
+因此建议的持久化数据集为：
 
-其中 `Trade` 必须同时保留 I024 `MATCH-TIME` 与 header `INFORMATION-TIME`，以及
-first/continuation packet bit。仅保留当前 orderbook 行无法恢复一包多笔成交的价格路径。
+| 优先级 | record / dataset | 来源 | 建议 |
+|---|---|---|---|
+| P0 | `Orderbook<N>` | I081 / I083 | 普通 N 档 applied state；不重复成交状态 |
+| P0 | `Trade` | I024 每个 price/quantity item | 一项一行，保留业务时间、发布时间和 packet 顺序 |
+| P0 | `TradePacket` | I024 packet summary | 保存交易所累计量、买卖成交笔数和 match group 边界 |
+| P1 | `DerivedOrderbook<1>` | I081 overlay / I083 snapshot | 衍生一档，与普通五档独立 |
+| P1 | `HighLow` | I025 | 官方盘中 high/low checkpoint 与 `SHOW-TIME` |
+| P1 | `OrderStats` | I030 | 累计买卖委托笔数与口数 |
+| P1 | status datasets | I140 | 交易状态、涨跌停扩展、动态价格稳定措施事件 |
+| P2 | `OrderbookDelta` | I081 entry | 可选 exact replay / microstructure 数据；体积很大 |
+| P2 | `QuoteRequest` | I100 | 询价揭示事件 |
+| P2 | underlying datasets | I060 / I064 | 标的现货与标的试算/状态 |
+| P2 | session statistics | I070-I073 | 盘后统计；包含 open interest，不是盘中 tick |
+
+运行时若策略需要“最近成交 + 当前盘口”的宽状态，可由同一 symbol 的有序事件更新内部
+`MarketState`；不应为了运行时方便，把 Trade 字段重复写入每一条 Orderbook CSV。
 
 ## 范围与事实源
 
-本设计交叉核对：
+本设计只覆盖 futures 日盘，不包含夜盘交易日映射、options、block trade 逐笔或历史 schema
+迁移。事实源按优先级为：
 
-- `data/docs/exchange/期貨逐筆行情資訊傳輸作業手冊(V1.5.1).pdf`
-- Aries 当前 TAIFEX protocol、decoder、recovery builder、records 与 CSV writer
-- `/home/liuxiang/dev/orion` 的 `FutureOrderbook<5>`、TAIFEX converter、data engine、
-  data reader、orderbook builder 与 `FactorCsvWriter`
-- 2026-07-07 TAIFEX futures dump、当前完整 dry-run 和前 2,000,000 frame 的字段扫描
+1. [TAIFEX《期貨逐筆行情資訊傳輸作業手冊 V1.5.1》](<../exchange/期貨逐筆行情資訊傳輸作業手冊(V1.5.1).pdf>)，尤其是 I024、I025、I030、
+   I070-I073、I081、I083、I084、I100、I140 与 orderbook management examples。
+2. Aries 的 `data/converter/taifex` protocol、decoder、builder、record 与 writer。
+3. `/home/liuxiang/dev/orion` 的 TAIFEX data reader/data engine/orderbook builder、
+   `FutureOrderbook<5>` 与 tools `to_csv` 路径。
+4. 2026-08-03 日盘真实 dump 的独立全文件 scanner，以及 Aries/Orion 对 DIFH6 的实盘对照。
 
-本文只设计当前 futures 日盘研究数据。夜盘、options、block trade 逐笔与跨 session
-统计继续不在本轮范围内；也不实施 schema 或历史重建。
+官方 wire field 是协议事实；本文提出的 normalized field 是 converter contract；mid、imbalance、
+aggressor inference 等属于研究派生。三者不得混写。
 
-## 设计原则
+## 全局 contract
 
-1. 普通 book、derived book、actual state 与 trial state 分开维护，不能互相覆盖。
-2. I024 一项 price/quantity 就是一条 Trade；packet summary 不能代替逐项路径。
-3. 同一字段只表达一种时间、单位和累计口径；transport time 与 business event time
-   不得混用。
-4. exchange direct fact、converter cumulative state 与研究推导字段明确分层。
-5. calendar spread 的负价和零价都是合法价格，不能用 `price == 0` 判断缺失或市价。
-6. snapshot 可以恢复 book 和部分 exchange summary，不能伪造遗漏 Trade 或精确 value。
-7. offline dump 没有真实 receive timestamp，fallback `local_ns` 不得用于 latency 研究。
-8. 所有价格使用 `double`；quantity/volume/count 使用有符号 `int64_t`，volume 单位为
-   contract。
+### 类型、身份与 CSV
 
-## 当前 struct 与 CSV
+- 所有 price 与累计 value 使用 `double`；所有 quantity/volume/count 使用有符号
+  `std::int64_t`，volume 单位为 contract。
+- `market` 使用 enum underlying numeric value；建议 `3=TAIFEX`，CSV 直接输出数值。
+- `symbol` 使用 `char[20]`，对应官方 `PROD-ID X(20)`。decoder 必须写满这 20 bytes；CSV
+  writer bounded 读取并去除尾端空白/零，不依赖第 20 byte 后的 `\0`。2026-08-03 实盘最长
+  symbol 为 11 bytes，但 schema 不能据此缩短官方上限。
+- `symbol_id` 是单次运行内 dense id，保留在高频 C++ record 以优化 catalog/state 直接索引，
+  但不写 CSV，也不承诺跨日稳定。
+- `trading_day` 由文件分区、generation manifest 与同 generation basic-info 表达，不在每条
+  高频 record/CSV 重复。夜盘实现前必须先锁定 trading-day mapping，不能仅从日历日期推断。
+- enum、source message、side、action 与 raw state CSV 均输出 underlying integer，不输出字符串。
+- 新 struct 无构造函数、默认成员初始化或 virtual function；实现时必须以 `static_assert`
+  锁定 trivial、standard-layout、trivially-copyable，不使用 `#pragma pack`。
 
-当前 `aries::data::taifex::Orderbook<N>` 包含：
+### 时间
 
-```text
-trading_day,symbol
-exchtime,localtime
-reference_price
-open,high,low,last_price
-trade_volume,total_volume,total_value
-total_buy_count,total_sell_count
-ask_price[N],ask_volume[N],bid_price[N],bid_volume[N]
-derived_ask_price,derived_ask_volume,derived_bid_price,derived_bid_volume
-match_flag,build_type,orderbook_action
-sequence
+所有 normalized timestamp 都是 Unix epoch ns。官方时钟为台湾本地时间，converter 结合有效
+交易日期转换；当前只允许日盘。
+
+| 字段 | 语义 |
+|---|---|
+| `exchange_ns` | 当前业务事件的官方业务时间；Trade 用 I024 `MATCH-TIME`，HighLow 用 I025 `SHOW-TIME`，Orderbook 用 I081/I083 header `INFORMATION-TIME` |
+| `information_ns` | common header `INFORMATION-TIME`；只有业务时间与发布时间可能不同的 record 才单独保存 |
+| `local_ns` | 本机 receive/capture time；offline dump 没有该字段时使用 `information_ns` fallback，并在 manifest 写明来源 |
+
+`information_ns - exchange_ns` 只能表示交易所业务时间到发布 header 时间之差，不能冒充
+network latency。offline 的 `local_ns` 也不得用于 latency 研究。
+
+### 排序与唯一键
+
+- `PROD-MSG-SEQ` 按 product 递增，并由 I024/I025/I081/I083 共用；它是 symbol event
+  continuity key，不是 Trade-only 或 Orderbook-only row number。
+- I024 一包多项用 `source_index` 保序；I081 一包多 entry 也用 `source_index` 保序。
+- common header `CHANNEL-ID/CHANNEL-SEQ` 用于 multicast transport gap 检查；除 I030/I100
+  这类没有 `PROD-MSG-SEQ` 的记录外，不在每条高频 CSV 重复。
+- 文件内确定性 merge key 为 `(symbol, source_sequence, source_index)`；不同 record 类型按
+  product sequence 合并，不按 CSV 文件写出先后猜测。
+
+### actual、trial、snapshot 与 recovery
+
+- actual ordinary book 与 trial ordinary book 必须是两份独立 state。
+- actual I024 只更新 actual trade state；trial I024 只发布 trial Trade，不污染 actual
+  last/OHLC/volume/value。
+- I083 必须先清空对应 lane 再完整替换；trial I083 不能清空 actual ordinary/derived state。
+- I084 是 recovery snapshot。I084 O/S/P 用于恢复 state 和质量审计，不能伪装成发生在恢复
+  时刻的 I083/I024/I140 实时事件。
+- gap 可恢复 book 与部分累计统计，但不能恢复遗漏 I024 的逐项价格路径。缺失成交额只可按
+  已锁定的 missing-volume 规则估算并写 quality summary，不能称为 exchange value。
+
+## 当前 44 列 Orderbook 的迁移建议
+
+当前 C++ `Orderbook<N>` 与 CSV 把 book、trade state、derived、source action 和 metadata 混在
+一行。逐字段建议如下：
+
+| 序号 | 当前字段 | 新 record | CSV | 建议 |
+|---:|---|---|:---:|---|
+| C01 | `trading_day` | partition / manifest | 否 | 从高频行删除；由路径、manifest、basic-info 表达 |
+| C02 | `market`（当前仅 CSV 常量） | 所有高频 record | 是 | 放入 record，输出 enum numeric value |
+| C03 | `symbol` | 所有 product record | 是 | 改为 `char[20]`，保留 official product id |
+| C04 | `symbol_id`（当前 CSV 恒 `-1`） | internal record | 否 | 在 C++ 保留 dense id，CSV 删除 |
+| C05 | `exchtime` | 各 record | 是 | 改名 `exchange_ns`，按 record 使用正确业务时间 |
+| C06 | `localtime` | 各 record | 是 | 改名 `local_ns`，offline fallback 写入 manifest |
+| C07 | `reference_price` | basic-info / price-limit | 否 | 从 Orderbook 删除，按 generation join |
+| C08 | `open` | derived/session statistics | 否 | 从 Orderbook 删除；盘中由 actual Trade/session mode 推导，盘后用 I070-I073 校验 |
+| C09 | `high` | `HighLow` / derived | 否 | 从 Orderbook 删除；I025 是官方 checkpoint |
+| C10 | `low` | `HighLow` / derived | 否 | 同 C09 |
+| C11 | `last_price` | `Trade.price` / runtime state | 否 | 从 Orderbook 删除，避免把旧成交重复写到每次 book update |
+| C12 | `trade_volume` | `Trade.volume` / `TradePacket.packet_volume` | 否 | 从 Orderbook 删除；当前“到下一条 book 为止”的窗口依赖发布时机 |
+| C13 | `total_volume` | `TradePacket.exchange_total_volume` | 否 | 移到 packet summary，不在 book 重复 |
+| C14 | `total_value` | `TradePacket.total_value` | 否 | 移到 packet summary；这是 converter 计算值，不是 exchange book field |
+| C15 | `total_buy_count` | `TradePacket.total_buy_match_count` | 否 | 移出；不是 bid volume，也不能代表 aggressor |
+| C16 | `total_sell_count` | `TradePacket.total_sell_match_count` | 否 | 同 C15 |
+| C17 | `ask_price[N]` | `Orderbook<N>` | 是 | 保留普通卖方 N 档，signed `double` |
+| C18 | `ask_volume[N]` | `Orderbook<N>` | 是 | 保留，contract 数 |
+| C19 | `bid_price[N]` | `Orderbook<N>` | 是 | 保留普通买方 N 档，signed `double` |
+| C20 | `bid_volume[N]` | `Orderbook<N>` | 是 | 保留，contract 数 |
+| C21 | `derived_ask_price` | `DerivedOrderbook<1>` | 否 | 从普通 Orderbook 移出 |
+| C22 | `derived_ask_volume` | `DerivedOrderbook<1>` | 否 | 同 C21 |
+| C23 | `derived_bid_price` | `DerivedOrderbook<1>` | 否 | 同 C21 |
+| C24 | `derived_bid_volume` | `DerivedOrderbook<1>` | 否 | 同 C21 |
+| C25 | `match_flag` | `is_trial` | 是 | 只描述当前 source lane；不得继承前一条 I024/I083 |
+| C26 | `build_type` | `source_message` | 是 | 删除不透明 `0/3`，输出 typed I081/I083 numeric code |
+| C27 | `orderbook_action` | `OrderbookDelta.action` | 否 | 从主表删除；当前 0/1 压缩丢失 Change/Delete/Overlay |
+| C28 | `sequence` | `source_sequence` | 是 | 明确为 common per-product `PROD-MSG-SEQ` |
+
+## `Orderbook<N>`
+
+### 建议 C++ schema
+
+```cpp
+enum class Market : std::uint8_t {
+  kTaifex = 3,
+};
+
+enum class BookSource : std::uint8_t {
+  kI081 = 81,
+  kI083 = 83,
+};
+
+template <std::size_t N>
+struct Orderbook {
+  char symbol[20];
+
+  std::int64_t exchange_ns;
+  std::int64_t local_ns;
+
+  std::int32_t symbol_id;
+
+  Market market;
+  BookSource source_message;
+  std::uint8_t is_trial;
+  std::uint8_t best_ask_is_market;
+  std::uint8_t best_bid_is_market;
+
+  double ask_price[N];
+  std::int64_t ask_volume[N];
+  double bid_price[N];
+  std::int64_t bid_volume[N];
+
+  std::uint64_t source_sequence;
+};
 ```
 
-当前 CSV 另加常量 `market=TAIFEX` 与 `symbol_id=-1`，固定为 44 列。一行只由 I081 或
-I083 触发；I024/I025 先修改 mutable state，再合并到下一条 book row。
+字段逻辑顺序不等于最终内存排布；实现时可在不改变 schema 的前提下按自然对齐重排，并用
+`sizeof/offsetof` 测试锁定当前 ABI。
 
-这个结构无法无损表达：
+### 字段表
 
-- I024 的 `MATCH-TIME`、一包多项成交与 continuation；
-- I081 内逐 entry 的 New / Change / Delete / Overlay 顺序；
-- actual 与 trial 各自的普通 book；
-- ordinary 与 derived book 的独立更新节奏；
-- I025 `SHOW-TIME`；
-- gap 后哪些累计 value 已不能精确恢复。
+| 序号 | 字段 | CSV | 来源 / 单位 | 建议与语义 |
+|---:|---|:---:|---|---|
+| OB01 | `symbol` | 是 | I081/I083 `PROD-ID` | 保留；20-byte bounded product id |
+| OB02 | `market` | 是 | normalized enum | 保留，输出 `3` |
+| OB03 | `exchange_ns` | 是 | header `INFORMATION-TIME` | 当前 book state 完整可用的 exchange publish time |
+| OB04 | `local_ns` | 是 | capture / offline fallback | 保留；fallback 不可研究 latency |
+| OB05 | `symbol_id` | 否 | converter catalog | 内部保留，CSV 删除 |
+| OB06 | `source_message` | 是 | I081 / I083 | 区分 incremental-applied state 与 full snapshot state |
+| OB07 | `is_trial` | 是 | I083 `CALCULATED-FLAG` | `0=actual,1=trial`；I081 恒为 0 |
+| OB08 | `ask_price[N]` | 是 | ordinary sell levels | signed price；零价 spread 合法 |
+| OB09 | `ask_volume[N]` | 是 | contracts | 空档 `price=0,volume=0` |
+| OB10 | `bid_price[N]` | 是 | ordinary buy levels | signed price；零价 spread 合法 |
+| OB11 | `bid_volume[N]` | 是 | contracts | 空档 `price=0,volume=0` |
+| OB12 | `best_ask_is_market` | 是 | I083 trial sentinel | trial best ask 为市价时 1，并把 normalized price 写 0 |
+| OB13 | `best_bid_is_market` | 是 | I083 trial sentinel | trial best bid 为市价时 1，并把 normalized price 写 0 |
+| OB14 | `source_sequence` | 是 | `PROD-MSG-SEQ` | 触发本 state row 的 product sequence |
 
-## 当前字段逐一建议
+### 发布与盘口应用规则
 
-| 当前字段 | 建议 | 目标语义 / 原因 |
+- I081 entry 必须按 wire `source_index` 顺序逐一应用；New/Delete 会移动后续档位，不能先
+  regroup 再更新。
+- 一条 I081 含至少一个 ordinary action 时，应用整包后最多发布一条 `Orderbook`。
+  derived-only I081 不发布重复 ordinary row。
+- actual I083 清空并替换 actual ordinary/derived state；count=0 也发布 empty ordinary row。
+- trial I083 只清空并替换 trial ordinary state。协议规定 trial 没有 derived order，不能
+  因 trial snapshot 清空 actual derived state。
+- trial best market bid sentinel 为 `+999999999`，best market ask sentinel 为
+  `-999999999`。normalized price 写 0 并用 market flag 区分；不得用 `price==0` 推断 empty
+  或 market，因为 calendar spread 的 0 是合法 limit price。
+- I084 O 只恢复 state 与 as-of sequence，不生成伪实时 Orderbook row。
+
+## `Trade`
+
+### 建议 C++ schema
+
+```cpp
+struct Trade {
+  char symbol[20];
+
+  std::int64_t exchange_ns;
+  std::int64_t information_ns;
+  std::int64_t local_ns;
+
+  std::int64_t volume;
+  double price;
+
+  std::uint64_t source_sequence;
+  std::uint64_t match_group_sequence;
+
+  std::int32_t symbol_id;
+
+  Market market;
+  std::uint8_t is_trial;
+  std::uint8_t is_first_packet;
+  std::uint8_t source_index;
+};
+```
+
+### 字段表
+
+| 序号 | 字段 | CSV | 来源 / 单位 | 建议与语义 |
+|---:|---|:---:|---|---|
+| T01 | `symbol` | 是 | I024 `PROD-ID` | 保留 official product id |
+| T02 | `market` | 是 | normalized enum | 输出 `3` |
+| T03 | `exchange_ns` | 是 | I024 `MATCH-TIME` | 成交/试撮业务发生时间 |
+| T04 | `information_ns` | 是 | header `INFORMATION-TIME` | packet exchange publish time；不能用来替代 MATCH-TIME |
+| T05 | `local_ns` | 是 | capture / fallback | offline fallback 为 information time |
+| T06 | `symbol_id` | 否 | internal catalog | C++ 保留，CSV 删除 |
+| T07 | `is_trial` | 是 | `CALCULATED-FLAG` | actual/trial 必须独立消费 |
+| T08 | `price` | 是 | 当前 item signed price | spread 可负或为零；全部使用 `double` |
+| T09 | `volume` | 是 | 当前 item quantity | contract 数；不同 item 不合并 |
+| T10 | `is_first_packet` | 是 | bitmap bit 7 | 1 表示本 packet 开始一个 incoming-order match group |
+| T11 | `source_sequence` | 是 | packet `PROD-MSG-SEQ` | 同 packet 的全部 item 相同 |
+| T12 | `source_index` | 是 | converter 解析顺序 | FIRST item 为 0，extra item 为 1..70 |
+| T13 | `match_group_sequence` | 是 | converter monotonic id | 同一 first+continuation group 共用；不是 exchange order id |
+
+一项 price/quantity 对应一行 Trade。source-level 唯一键是
+`(symbol, source_sequence, source_index)`；`match_group_sequence` 只为直接识别官方
+first/continuation group：在每个 partition/symbol 的完整 I024 流中，每遇到 first packet
+递增一次，continuation 继承当前值。遇到 gap、orphan continuation 或 continuation 的
+`MATCH-TIME` 与 first 不一致时，写 date/symbol/sequence quality log；不新增伪造 order id。
+Trade dataset 的 source 恒为 I024，由 schema/manifest 锁定，不在每行重复 `source_message`。
+
+I024 bitmap 低 7 bits 是“FIRST 后额外 item 数”，最大 70，所以 packet 最多 71 条 Trade。
+官方示例明确一张 incoming order 的 100 笔成交会拆为 first packet 与 continuation packet，
+且 continuation 使用相同 `MATCH-TIME`。2026-08-03 没出现 continuation 不能成为不实现它的
+理由。
+
+### 不加入 `trade_side`
+
+I024 不提供 aggressor side，也不提供 resting/incoming order id。I024 尾部累计买进/卖出
+成交笔数表示成交双方统计，不是主动方向：2026-08-03 的 477,489 个 actual packet 中，
+两个累计 count 每包都同时增长，`buy-only=0`、`sell-only=0`。因此：
+
+- `Trade` 不保存 `trade_side`；
+- 不从累计 count、下一条五档或单档 volume change 伪造 exchange fact；
+- 研究层若做 Lee-Ready、quote test 或 book-delta inference，应输出独立 derived dataset，
+  带 method、as-of quote、confidence/unknown，不覆盖 source Trade。
+
+## `TradePacket`
+
+packet summary 是 exchange direct fact，不能重复分摊到每个 Trade item。建议每个 I024
+packet 一行：
+
+| 序号 | 字段 | CSV | 来源 / 单位 | 建议与语义 |
+|---:|---|:---:|---|---|
+| TP01 | `symbol` | 是 | I024 | 同 Trade |
+| TP02 | `market` | 是 | normalized enum | 输出 `3` |
+| TP03 | `exchange_ns` | 是 | `MATCH-TIME` | group 业务时间 |
+| TP04 | `information_ns` | 是 | header time | packet 发布时间 |
+| TP05 | `local_ns` | 是 | capture / fallback | 同 Trade |
+| TP06 | `symbol_id` | 否 | internal catalog | C++ 保留，CSV 删除 |
+| TP07 | `is_trial` | 是 | `CALCULATED-FLAG` | trial summary 不更新 actual state |
+| TP08 | `is_first_packet` | 是 | bitmap bit 7 | group start marker |
+| TP09 | `item_count` | 是 | `1 + bitmap[6:0]` | packet 内 Trade item 数，1..71 |
+| TP10 | `packet_volume` | 是 | converter sum(items) | 当前 packet 明示成交口数 |
+| TP11 | `exchange_total_volume` | 是 | `MATCH-TOTAL-QTY` | packet 结束后的 exchange cumulative contracts |
+| TP12 | `total_buy_match_count` | 是 | `MATCH-BUY-CNT` | exchange cumulative buy-side match count；不是主动买 |
+| TP13 | `total_sell_match_count` | 是 | `MATCH-SELL-CNT` | exchange cumulative sell-side match count；不是主动卖 |
+| TP14 | `total_value` | 是 | converter cumulative currency | actual packet 为累计名义成交额；trial packet 固定输出 0，且不更新 actual value |
+| TP15 | `source_sequence` | 是 | `PROD-MSG-SEQ` | packet source key |
+| TP16 | `match_group_sequence` | 是 | converter id | 与 Trade T13 相同 |
+
+`total_value` 的统一口径为：
+
+```text
+observed_value = sum(abs(item.price) * item.volume * multiplier)
+volume_diff = exchange_total_volume - previous_exchange_total_volume
+missing_volume = volume_diff - packet_volume
+total_value += observed_value
+             + abs(last_actual_price) * missing_volume * multiplier
+```
+
+- 无 gap 时 `missing_volume=0`，全部使用逐项真实成交价。
+- gap/recovery 后只对 exchange cumulative volume 证明缺失的部分使用当前
+  `last_actual_price` 补值；记录 symbol、source sequence、volume diff、observed/missing
+  volume 和补值价格。不得把补值称为精确 exchange value。
+- multiplier/currency 必须来自同 generation basic-info；缺少 multiplier 时记录问题，不能
+  静默使用 1。
+- calendar spread 使用 `abs(price)`，因此 value 非负；它表示价差合约的项目统一名义口径，
+  不是两腿 gross notional、保证金或现金流。
+- 若 exchange summary 与当前有序状态出现 `volume_diff < packet_volume`，这是 sequence/state
+  contract 破坏，写错误日志并隔离该 symbol 的累计 state；不是靠 clamp 掩盖。
+
+`open/high/low/last` 不在 TradePacket 重复。last 就是最后一条 actual Trade price；盘中 OHLC
+由 actual Trade 按 session 规则派生，并由 I025 与 I070-I073 校验。官方开盘规则还包括：
+
+- 有集合竞价：首个 actual I024 packet 的第一项为 open；
+- 无集合竞价、连续撮合开盘：open 是开盘撮合批次的最后成交价，不保证是 packet 第一项；
+- 无成交：futures official open/reference/close 相同。
+
+因此不能只用“第一笔 actual trade”或 `open==0` 判断开盘，零价 spread 本身合法。
+
+## `DerivedOrderbook<1>`
+
+TAIFEX derived bid/ask 是交易所直接提供的一档，不是普通五档的第六档，也不能无条件从
+outright book 重算。建议 actual-only record：
+
+| 序号 | 字段 | CSV | 来源 / 单位 | 建议与语义 |
+|---:|---|:---:|---|---|
+| DB01 | `symbol` | 是 | I081/I083 | official product id |
+| DB02 | `market` | 是 | enum | 输出 `3` |
+| DB03 | `exchange_ns` | 是 | header time | derived state publish time |
+| DB04 | `local_ns` | 是 | capture / fallback | 同 Orderbook |
+| DB05 | `symbol_id` | 否 | internal | C++ 保留，CSV 删除 |
+| DB06 | `ask_price` | 是 | derived sell | signed double；empty 为 0/0 |
+| DB07 | `ask_volume` | 是 | contracts | derived sell quantity |
+| DB08 | `bid_price` | 是 | derived buy | signed double；empty 为 0/0 |
+| DB09 | `bid_volume` | 是 | contracts | derived buy quantity |
+| DB10 | `source_message` | 是 | I081/I083 | numeric source |
+| DB11 | `source_sequence` | 是 | product sequence | source key |
+
+I081 action 5 是 overlay；price/volume 都为 0 表示清除。一条 source 同时更新 ordinary 与
+derived 时，两张 state 表共享 `(symbol, exchange_ns, source_sequence)`。actual I083 先清空
+再替换，缺少 derived entry 也要发布 empty state；trial I083 不发布 derived，也不清空
+actual derived。
+
+## 可选 `OrderbookDelta`
+
+I081 entry 是 level action，不是逐笔委托：协议没有 order id、queue position 或每档订单数。
+若 exact replay、撤挂统计或 builder debug 需要，建议一 entry 一行：
+
+| 序号 | 字段 | CSV | 来源 / 单位 | 建议与语义 |
+|---:|---|:---:|---|---|
+| OD01 | `symbol` | 是 | I081 | product id |
+| OD02 | `market` | 是 | enum | 输出 `3` |
+| OD03 | `exchange_ns` | 是 | header time | source publish time |
+| OD04 | `local_ns` | 是 | capture / fallback | 同 Orderbook |
+| OD05 | `symbol_id` | 否 | internal | C++ 保留，CSV 删除 |
+| OD06 | `book_type` | 是 | entry type | `0=ordinary,1=derived` normalized numeric |
+| OD07 | `side` | 是 | wire type | `0=bid,1=ask` numeric |
+| OD08 | `action` | 是 | wire action | `0=New,1=Change,2=Delete,5=Overlay` |
+| OD09 | `level` | 是 | wire level | 1-based；derived overlay 按协议处理 |
+| OD10 | `price` | 是 | signed double | action payload price |
+| OD11 | `volume` | 是 | contracts | action payload quantity |
+| OD12 | `source_sequence` | 是 | product sequence | message source key |
+| OD13 | `source_index` | 是 | entry index | 同一 I081 内严格 wire order |
+
+I083 是 snapshot，不伪造为一组 delta。2026-08-03 日盘 I081 有 51,183,942 个 entry，
+delta 表的存储量可能高于 applied state；只有明确需要 exact action path 时才发布。
+
+## I025 `HighLow`
+
+I025 的 `SHOW-TIME` 是最近一次价格穿越当前 high/low 的业务时间；header
+`INFORMATION-TIME` 是消息发布时间。两者都要保存：
+
+| 序号 | 字段 | CSV | 来源 / 单位 | 建议与语义 |
+|---:|---|:---:|---|---|
+| HL01 | `symbol` | 是 | I025 | product id |
+| HL02 | `market` | 是 | enum | 输出 `3` |
+| HL03 | `exchange_ns` | 是 | `SHOW-TIME` | high/low 生效业务时间 |
+| HL04 | `information_ns` | 是 | header time | source publish time |
+| HL05 | `local_ns` | 是 | capture / fallback | offline fallback 为 information time |
+| HL06 | `symbol_id` | 否 | internal | C++ 保留，CSV 删除 |
+| HL07 | `high` | 是 | signed price | official intraday high checkpoint |
+| HL08 | `low` | 是 | signed price | official intraday low checkpoint |
+| HL09 | `source_sequence` | 是 | product sequence | source key |
+
+它既可发布为稀疏研究数据，也必须用于验证/recovery actual Trade 派生 high/low。2026-08-03
+有 9,870 条 I025，其中 864 条 `SHOW-TIME != INFORMATION-TIME`。
+
+## I030 `OrderStats`
+
+I030 是 per-product 累计委托统计，不是可见五档总量，也不能还原 order id：
+
+| 序号 | 字段 | CSV | 来源 / 单位 | 建议与语义 |
+|---:|---|:---:|---|---|
+| OS01 | `symbol` | 是 | I030 | product id |
+| OS02 | `market` | 是 | enum | 输出 `3` |
+| OS03 | `exchange_ns` | 是 | header time | official publish time |
+| OS04 | `local_ns` | 是 | capture / fallback | 同上 |
+| OS05 | `symbol_id` | 否 | internal mapping | 能映射时保留，CSV 删除 |
+| OS06 | `buy_order_count` | 是 | cumulative count | 买方累计委托笔数 |
+| OS07 | `buy_order_volume` | 是 | cumulative contracts | 买方累计委托口数 |
+| OS08 | `sell_order_count` | 是 | cumulative count | 卖方累计委托笔数 |
+| OS09 | `sell_order_volume` | 是 | cumulative contracts | 卖方累计委托口数 |
+| OS10 | `channel_id` | 是 | common header | I030 没有 product sequence，需保留 transport identity |
+| OS11 | `channel_sequence` | 是 | common header | I030 source ordering / gap audit |
+
+2026-08-03 日盘有 1,360,652 条 I030，足以形成独立 order-flow 研究表；不能把它的 volume
+复制进每条五档。
+
+## I100 `QuoteRequest`
+
+I100 是询价揭示事件，建议独立稀疏表：
+
+| 序号 | 字段 | CSV | 来源 / 单位 | 建议与语义 |
+|---:|---|:---:|---|---|
+| QR01 | `symbol` | 是 | `PROD-ID-S X(10)` | 按 basic-info/catalog 映射 |
+| QR02 | `market` | 是 | enum | 输出 `3` |
+| QR03 | `exchange_ns` | 是 | body `DISCLOSURE-TIME` | 询价揭示时间 |
+| QR04 | `information_ns` | 是 | header time | packet publish time |
+| QR05 | `local_ns` | 是 | capture / fallback | offline fallback 为 information time |
+| QR06 | `duration_seconds` | 是 | body | 揭示持续秒数 |
+| QR07 | `channel_id` | 是 | header | transport source |
+| QR08 | `channel_sequence` | 是 | header | source ordering |
+
+2026-08-03 日盘有 210 条 I100。它不是 Trade，也不改变 Orderbook levels。
+
+## underlying 数据
+
+### I060 `UnderlyingSpot`
+
+| 字段 | 来源 / 建议 |
+|---|---|
+| `kind_id` | I060 `KIND-ID`；按期货/选择权契约类别关联 |
+| `market` | `3=TAIFEX` |
+| `exchange_ns` | body time；缺少时以 header time 为事件时间并保留 `information_ns` |
+| `information_ns` / `local_ns` | publish / capture time |
+| `field_bitmap` | 原始 optional-field bitmap，CSV 输出 numeric value |
+| `last_price` | bitmap 揭示时有效，否则 CSV 为空 |
+| `bid_price` / `ask_price` | bitmap 揭示时有效，否则为空 |
+| `fixing_price` | bitmap 揭示时有效，否则为空 |
+| `source_date` | body 提供日期时保存，不能与 futures trading day 混用 |
+| `channel_id` / `channel_sequence` | I060 没有 product sequence，保留 header source |
+
+### I064 `UnderlyingTrialStatus`
+
+| 字段 | 来源 / 建议 |
+|---|---|
+| `kind_id` | I064 contract kind |
+| `market` | `3=TAIFEX` |
+| `exchange_ns` / `information_ns` / `local_ns` | body event time、header publish time、capture time |
+| `value` | 官方 underlying trial value，signed `double` |
+| `status` | 原始 bitmap numeric value，至少保留 delayed-open/delayed-close bits |
+| `channel_id` / `channel_sequence` | transport ordering |
+
+2026-08-03 日盘有 348,124 条 I060 与 12,990 条 I064。它们适合基差、标的状态研究，
+但不应塞入每个期货产品的 Orderbook。
+
+## I140 状态事件
+
+I140 的 scope 可以是 flow group、contract kind 或 product，不适合做一个塞满 nullable 字段的
+宽 `InstrumentStatus`。建议按语义拆三张稀疏表，并共同保留
+`market, information_ns, local_ns, function_code, scope_type, scope_id,
+channel_id, channel_sequence`。
+
+### `TradingStatusEvent`
+
+| 字段 | 来源 / 语义 |
+|---|---|
+| common identity/time/source | 上述共同字段 |
+| `reason` | I140 200/201 原因代码；其他 function 无原因时为空 |
+| `break_ns` | 200 暂停时间 |
+| `start_ns` | 201 恢复接受委托时间 |
+| `reopen_ns` | 201 重新开盘时间 |
+| `status` | normalized numeric：302 开始接受、305 不可取消、304 开盘、306 收盘不再恢复；同时保留原始 `function_code` |
+
+### `PriceLimitStatusEvent`
+
+| 字段 | 来源 / 语义 |
+|---|---|
+| common identity/time/source | I140 100/101 |
+| `level` | 涨跌停扩展层级 |
+| `expand_type` | 扩展类型 numeric value |
+| `status` | `100=即将扩展`、`101=已经扩展`，直接保留 function code |
+
+### `DynamicBandingEvent`
+
+| 字段 | 来源 / 语义 |
+|---|---|
+| common identity/time/source | I140 400-405 |
+| `reason` | 暂停/恢复/调整原因 |
+| `effective_ns` | body 提供的生效时间；另保留 information time |
+| `range` | 动态价格稳定范围，按 official decimal locator 转 `double` |
+| `side` | body 指定买/卖侧时输出 numeric value |
+| `status` | 400/403 suspend/announce、401/404 resume/announce、402/405 adjust/announce；保留 function code |
+
+2026-08-03 日盘 I140 共 199 条：302/304/305 各 5 条、306 3 条，400 1 条、401
+49 条、402 131 条；另有一条 306 在当前日盘 cutoff 后。I084 P 是 recovery snapshot 的
+产品状态、动态 banding 状态、扩展层级与 long/short range，不应伪造成 I140 event；可更新
+runtime state，并进入 recovery audit。
+
+## I070-I073 session statistics
+
+这些消息是 session/daily 统计，不是逐笔。2026-08-03 它们全部出现在当前
+`13:46:00` cutoff 后，需由独立盘后阶段消费，不能为了得到 open interest 放宽实时日盘边界。
+
+建议统一稀疏 `SessionStatistics` schema；不适用字段写 CSV empty，而不是写 0，因为 calendar
+spread 的 0 与负价都合法：
+
+| 序号 | 字段 | 来源 | 语义 |
+|---:|---|---|---|
+| SS01 | `symbol` | I070-I073 | product id |
+| SS02 | `market` | normalized | 输出 `3` |
+| SS03 | `information_ns` | header | official publish time |
+| SS04 | `local_ns` | capture/fallback | offline fallback |
+| SS05 | `source_message` | I070-I073 | numeric code，决定有效字段集合 |
+| SS06 | `term_high` / `term_low` | I070-I073 | 契约期间高低价 |
+| SS07 | `session_high` / `session_low` | I070-I073 | 本 session 高低价 |
+| SS08 | `open` | I070-I073 | official session open |
+| SS09 | `last_bid` / `last_ask` | I070-I073 | session end bid/ask |
+| SS10 | `close` | I070-I073 | official close |
+| SS11 | `buy_order_count` / `buy_order_volume` | I070-I073 | session 累计买委托统计 |
+| SS12 | `sell_order_count` / `sell_order_volume` | I070-I073 | session 累计卖委托统计 |
+| SS13 | `trade_count` / `trade_volume` | I070-I073 | session 成交笔数/口数 |
+| SS14 | `combined_buy_order_count` / `combined_buy_order_volume` | I070-I072 | 含协议定义组合范围的买委托统计 |
+| SS15 | `combined_sell_order_count` / `combined_sell_order_volume` | I070-I072 | 含协议定义组合范围的卖委托统计 |
+| SS16 | `combined_trade_volume` | I070-I072 | official `COMBINE-TOTAL-QTY`；协议没有对应 combined trade count |
+| SS17 | `settlement_price` | I071/I072 | official settlement |
+| SS18 | `open_interest` | I072 | session/daily open interest；不进入 Orderbook/Trade |
+| SS19 | `block_trade_volume` | I072 | block trade contracts |
+| SS20 | `channel_id` / `channel_sequence` | header | source ordering/audit |
+
+I072 的 price statistics 是 regular session；其他十二项统计按官方定义可能合并夜盘/日盘与
+一般/鉅額范围。夜盘实现时必须再锁定 session scope，不能把它们无标记并入日盘累计。
+I073 是 calendar-spread statistics，official NULL sentinel 为 `-999999999`，因为 spread
+zero price 有效；decoder 必须先按 source null 规则转为空值。
+
+2026-08-03 cutoff 后分别有 I070 13,384、I071 1,673、I072 5,022、I073 8,541 条。
+
+## I084 recovery snapshot
+
+I084 是明确带 A/O/S/P/Z 区段的 recovery stream，不是第二套实时逐笔行情。其字段必须被
+decoder 完整理解，但默认只更新 builder state 与 quality audit：
+
+| 区段 | official fields | 可恢复事实 | 持久化建议 |
+|---|---|---|---|
+| A | recovery begin | snapshot batch 开始 | generation log/manifest 记录 batch id、channel 与时间 |
+| O | product id、`LAST-PROD-MSG-SEQ`、ordinary/derived full levels | as-of sequence 的完整盘口 | 恢复 actual ordinary/derived state；不发布伪 I083 row |
+| S | last/first match、total volume、buy/sell match counts、high/low、I030 buy/sell order count/volume | as-of sequence 的成交与委托累计 checkpoint | 恢复/校验 TradePacket、HighLow、OrderStats state；不能生成遗漏 Trade items 或精确 value |
+| P | expand-up/down level、7-byte product status、dynamic-banding status、long/short expansion range | 产品与价格稳定状态 snapshot | 更新 status state；不发布伪 I140 event |
+| Z | recovery end | snapshot batch 完整结束 | 只有 A..Z 完整且 sequence 条件满足时标记 recovery success |
+
+建议质量输出按 recovery batch 和 symbol 记录：`requested/expected sequence`、
+`snapshot_last_sequence`、恢复的 state components、是否闭合 A..Z、是否成功衔接下一条 realtime
+product sequence。它属于 summary/log，不复制到每条高频 record。I084 无法恢复遗漏 I024 的
+每项 price/quantity，尤其不能把 S 的 total volume 反推成虚构 Trade。
+
+## static/reference、公告与 transport 的边界
+
+| 来源 | 归属 | 逐笔 CSV 建议 |
 |---|---|---|
-| `trading_day` | 保留 | converter 分区交易日，当前仅日盘 `YYYYMMDD` |
-| `market`（仅 CSV） | 放入 record 并保留 | typed constant `TAIFEX`；稳定身份是 `(trading_day, market, symbol)` |
-| `symbol` | 保留 | 去除尾端空白的 `PROD-ID`；outright 与 calendar spread 均原样保留 |
-| `symbol_id`（仅 CSV） | 删除 | runtime-local；offline 恒为 `-1`，不是持久化身份 |
-| `exchtime` | 改名 `exchange_ns` | 对 Orderbook 为触发行的 I081/I083 header `INFORMATION-TIME` |
-| `localtime` | 改名 `local_ns` | 真实接收/采集时间；offline 只能使用显式 fallback |
-| `reference_price` | 移出 | I010 日级 metadata；spread 可能无 I010，应从 basic-info join |
-| `open` | 保留并修正 | actual session open；不能一律使用首个 actual I024 的第一项 |
-| `high` | 保留并修正 | actual 当盘 high，由 Trade 更新并用 I025/I084 S/收盘统计校验 |
-| `low` | 保留并修正 | actual 当盘 low，规则同 `high` |
-| `last_price` | 保留并收紧 | 截至本行最近一项 **actual** Trade；trial 不得覆盖 |
-| `trade_volume` | 保留并收紧 | 自上一条 actual ordinary Orderbook row 后观察到的 actual contract 数 |
-| `total_volume` | 保留并收紧 | 最新 actual I024 `MATCH-TOTAL-QTY` 或有效 recovery summary |
-| `total_value` | 保留并收紧 | observed actual 非负累计名义 value：`abs(price) * volume * multiplier` |
-| `total_buy_count` | 移出 | I024 累计买进成交笔数，不是盘口字段；进入 `TradeStats` |
-| `total_sell_count` | 移出 | I024 累计卖出成交笔数，不是盘口字段；进入 `TradeStats` |
-| `ask_price[N]` | 保留 | 普通卖方第 1..N 档；signed `double` |
-| `ask_volume[N]` | 保留 | 普通卖方第 1..N 档 contract 数 |
-| `bid_price[N]` | 保留 | 普通买方第 1..N 档；signed `double` |
-| `bid_volume[N]` | 保留 | 普通买方第 1..N 档 contract 数 |
-| `derived_ask_price/volume` | 移出 | TAIFEX 衍生一档，进入 `DerivedOrderbook<1>` |
-| `derived_bid_price/volume` | 移出 | 同上 |
-| `match_flag` | 改名 `is_trial` | 对 Orderbook 只表示 I083 `CALCULATED-FLAG`；I081 恒为 actual |
-| `build_type` | 删除并改为 `source_message` | `0/3` 只是 I081/I083 的不透明 legacy code |
-| `orderbook_action` | 从主表删除 | 当前 0/1 压缩会丢 Change/Delete/Overlay 与 entry 顺序；需要时写 `OrderbookDelta` |
-| `sequence` | 改名 `source_sequence` | TAIFEX per-product `PROD-MSG-SEQ`，跨 I024/I025/I081/I083 连续 |
-
-### 不从 Orion 补回的字段
-
-Orion `FutureOrderbook<5>` 还含 `channel_id`、packed `status`、`open_interest`、
-`total_trade`、`total_ask_volume`、`total_bid_volume` 和 `continuous_flag`。它们不应补进
-正式 Orderbook：
-
-- `channel_id` / `CHANNEL-SEQ` 是 transport audit 信息，进入转换日志或 generation
-  manifest；per-product `PROD-MSG-SEQ` 才是 symbol event continuity key。
-- `open_interest` 来自 I072 收盘/session statistics，不是盘中 book state。
-- `total_trade` 在 Orion 没有可靠、唯一的填充 contract。
-- Orion 的 `total_ask_volume/total_bid_volume` 实际写入 I024 累计卖/买成交笔数，名称错误。
-- `continuous_flag` 是 recovery quality；当前项目继续按 date/symbol/gap 写日志，不复制到
-  每条高频行。
-
-## 建议的 TAIFEX `Orderbook<N>`
-
-最终 logical fields 建议为：
-
-```text
-trading_day
-market
-symbol
-exchange_ns
-local_ns
-source_message
-is_trial
-source_sequence
-
-open
-high
-low
-last_price
-trade_volume
-total_volume
-total_value
-
-ask_price[N]
-ask_volume[N]
-bid_price[N]
-bid_volume[N]
-best_ask_is_market
-best_bid_is_market
-```
-
-TAIFEX 不需要复制股票的 `disclosure`、`limit_state`、`session_state` 或 `event_type`。
-`source_message` 使用 typed `i081` / `i083`；消息类型本身已经区分
-incremental/snapshot，`is_trial` 足以区分 trial snapshot。这是保留 exchange-specific
-struct 的主要原因之一。
-
-### 时间 contract
-
-- Orderbook `exchange_ns` 使用触发行 I081/I083 common header 的
-  `INFORMATION-TIME`，转换为 UTC+8 trading-day local clock 对应的 Unix epoch ns。
-- I081/I083 没有比 header 更具体的业务时间，因此不另加 `information_ns`。
-- `local_ns` 正式定义为真实 receive/capture time。当前 dump 没有该字段，offline 暂令
-  `local_ns = exchange_ns`，并在 manifest 写
-  `local_time_source=information_time_fallback`。
-- fallback `local_ns` 不得用于 exchange latency、network latency 或 queueing 研究。
-- 当前 contract 只处理 `13:46:00` 前日盘；夜盘日期映射仍 deferred。
-
-### actual / trial state contract
-
-builder 内部至少维护两份普通 book state：
-
-- actual book：由 I081 与 `CALCULATED-FLAG=0` 的 I083 更新；
-- trial book：只由 `CALCULATED-FLAG=1` 的 I083 完整替换。
-
-trial I083 必须先清空并替换 **trial book**，不能清空 actual book；随后 actual I081 也不能
-在 trial book 上继续做差量更新。两份 book 共用同一套 per-product source sequence
-validation，但不共用 levels。发布 trial row 时 `is_trial=1`，五档来自 trial book，
-`open/high/low/last_price/total_volume/total_value` 仍是截至该时刻的 actual state，
-`trade_volume=0`。
-
-actual I024 才能更新 `last_price`、OHLC、volume 与 value。trial I024 进入
-`Trade(is_trial=1)`，不更新 actual state。`trade_volume` 只在 actual ordinary Orderbook
-row 发布后归零；trial I083 或 derived-only 更新既不显示也不消费这段 pending actual
-volume。
-
-### 零价 spread、empty level 与 trial 市价单
-
-TAIFEX calendar spread 可以合法成交或挂单在零价；同时 I083 规定 trial 最佳市价买单用
-`+999999999`、trial 最佳市价卖单用 `-999999999`。因此不能复用股票的
-`price=0, volume>0` 规则，也不能只用 price 判断 empty。
-
-建议在 decoder 中把 trial market sentinel 规范化为：
-
-| 状态 | price | volume | `best_*_is_market` |
-|---|---:|---:|---:|
-| empty | `0` | `0` | `0` |
-| 合法零价 limit spread | `0` | `>0` | `0` |
-| trial market order | `0` | `>0` | `1` |
-| 普通 limit | source price | `>0` | `0` |
-
-protocol 只允许 best level 使用该 market sentinel，因此两个 side-level boolean 足够；
-不需要为全部 N 档重复 price type。若实现选择保留 sentinel 原值，则必须在 schema 明确
-它不是可直接进入 mid/spread 的正常价格；相比之下，typed boolean 更适合研究使用。
-
-### I081 / I083 发布规则
-
-- I081 的 entries 必须按 source 顺序逐一应用；同一 message 的后一个 level 基于前一个
-  更新后的 book。
-- 一条 I081 含普通 action 时，完成全部 entries 后最多发布一条 ordinary Orderbook。
-- derived-only I081 不发布重复 ordinary Orderbook，只发布 `DerivedOrderbook<1>`；精确
-  Trade 已由独立表提供，因此不需要借 duplicate book row 承载成交状态。
-- actual I083 先清空并完整替换 actual ordinary/derived state。即使 count=0，也必须发布
-  ordinary empty-book row，并发布 derived empty state 以表示清空。
-- trial I083 只替换并发布 trial ordinary book；协议说明 trial 阶段没有 derived order，
-  不能用它清空 actual derived state。
-- I084 O 只恢复 builder state 与 `source_sequence`，不伪装成一条实时 I083 market event；
-  snapshot 之后 replay 的 I081/I083 保留其原始 source time/sequence。
-
-## 独立 `Trade`
-
-TAIFEX I024 每个 packet 含一项 `FIRST-MATCH-PRICE/QTY`，随后可含 0..70 项
-`MATCH-PRICE/QTY`。同一 incoming order 若产生 100 笔成交，会拆成 first packet 与
-continuation packet；两包 `MATCH-TIME` 相同。当前把整包压进下一条 Orderbook 会永久
-丢失逐项价格路径，正式 schema 必须同步输出 `Trade`。
-
-建议一项 price/quantity 对应一行：
-
-```text
-trading_day
-market
-symbol
-exchange_ns
-information_ns
-local_ns
-is_trial
-price
-volume
-total_volume
-total_value
-is_first_packet
-source_sequence
-source_index
-sequence
-```
-
-### Trade 字段 contract
-
-| 字段 | 类型 / 单位 | 语义 |
-|---|---|---|
-| `trading_day` | `int32_t YYYYMMDD` | 当前日盘 converter partition |
-| `market` | `Market::TAIFEX` | exchange identity |
-| `symbol` | string | I024 `PROD-ID`，包含 outright 或 spread 原文 |
-| `exchange_ns` | `int64_t ns` | I024 `MATCH-TIME`，即成交/试撮业务时间 |
-| `information_ns` | `int64_t ns` | common header `INFORMATION-TIME`，即 packet exchange publish time |
-| `local_ns` | `int64_t ns` | receive/capture time；offline 暂用 `information_ns` fallback |
-| `is_trial` | bool | I024 `CALCULATED-FLAG`，`0=actual`、`1=trial` |
-| `price` | signed `double` | 当前 item price；spread 可为负或零 |
-| `volume` | `int64_t` contracts | 当前 item quantity，不合并不同 item |
-| `total_volume` | `int64_t` contracts | 应用当前 actual item 后的 actual 累计成交量；trial row 保持 actual state |
-| `total_value` | `double` currency | 应用当前 actual item 后的 observed actual 累计名义 value；trial row 保持不变 |
-| `is_first_packet` | bool | I024 bitmap bit 7；表示本 packet 开始一个 incoming-order match group |
-| `source_sequence` | `uint64_t` | packet 的 `PROD-MSG-SEQ`；同 packet 所有 item 相同 |
-| `source_index` | `uint8_t` | packet 内 item index，FIRST 为 0，后续项为 1..70 |
-| `sequence` | `uint64_t` | 每 `(trading_day,market,symbol)` 的 Trade row ordinal |
-
-`(trading_day, market, symbol, source_sequence, source_index)` 是 source-level 唯一键；
-`sequence` 是便于下游排序和窗口计算的 converter row key。`source_sequence` 不是 Trade-only
-流水号，它与 I025/I081/I083 跨消息类型共用，出现数值跳号不等于 Trade 丢失。
-
-TAIFEX 这张 Trade 表的唯一 source 是 I024，因此不为每行重复常量 `source_message`；
-schema/version 与 generation manifest 必须锁定 `source=I024`。未来若接入不同 contract 的
-block trade 或其他成交来源，应另建 record/file，不能无标记混入。
-
-### MATCH-TIME 与 INFORMATION-TIME
-
-两个时间都需要保存：
-
-- `MATCH-TIME` 回答“成交何时发生”，用于逐笔排序、bar、label 和 market-state 对齐；
-- `INFORMATION-TIME` 回答“交易所何时发布这个 packet”，用于 source audit；
-- 二者都不是本机 receive time，`information_ns - exchange_ns` 也不能冒充 network latency。
-
-2026-07-07 前 2,000,000 frame 样本中，127,339 个 I024 packet 有 91,114 个
-`MATCH-TIME != INFORMATION-TIME`。继续把 header time 当作 Trade event time 会系统性改变
-逐笔时间与对齐结果。
-
-### multi-item 与 continuation
-
-- 每个 packet 先输出 `source_index=0` 的 FIRST item，再按 wire 顺序输出 1..70。
-- 同一 packet 的 Trade 共享 `exchange_ns`、`information_ns`、`is_trial`、
-  `is_first_packet` 与 `source_sequence`。
-- bit 7 为 0 时表示 continuation；它不是“本 item 不是第一项”，不能由
-  `source_index > 0` 代替。
-- 不持久化 converter 猜测的 `incoming_order_id` 或 `match_group_id`。下游可在
-  per-product sequence 连续、无 gap 时，根据 first/continuation 与相同 `MATCH-TIME`
-  派生 group；一旦 first packet 落在 gap 内，该 group 只能标记不完整。
-- continuation `MATCH-TIME` 与 first packet 不一致、orphan continuation 或 item count
-  越界都必须写 date/symbol/source sequence 日志，不能静默另起 group。
-
-### cumulative volume / value
-
-I024 的 `MATCH-TOTAL-QTY` 是 packet 结束后的 exchange cumulative quantity，而不是每个
-item 自带的 cumulative。对 actual packet，可从末项向前严格展开：
-
-```text
-item_total_volume[i] = packet_match_total_qty
-                       - sum(volume[j] for j > i in the same packet)
-```
-
-必须校验 packet item volume 总和不大于 `MATCH-TOTAL-QTY`，且与上一 actual summary 的
-变化一致；gap 后以前者为 authoritative cumulative volume，并把缺失范围写入质量日志。
-
-`total_value` 继续使用项目已锁定的统一口径：
-
-```text
-total_value += abs(price) * volume * multiplier
-```
-
-- quantity 是 contract；multiplier 与 currency 从同 generation basic-info join。
-- calendar spread value 是价差绝对值的名义量，不是两条腿 gross notional、保证金或现金流。
-- exchange 不提供累计 value。若 gap 遗漏 I024，I084 只能恢复 total volume 与部分统计，
-  无法恢复遗漏价格路径；该 symbol 后续 `total_value` 必须由 manifest/log 标记为不完整，
-  不能用 snapshot total volume 猜价格回填。
-- trial item 不改变 actual `total_volume/total_value`；其 price/volume 只保留试撮事实。
-
-### open / high / low / last
-
-- `last_price/high/low` 按 Trade item wire 顺序只由 actual item 更新；I025/I084 S 用于
-  recovery 和一致性校验。
-- I025 的业务时间是 `SHOW-TIME`，不是 header `INFORMATION-TIME`。若将其输出为独立
-  `HighLow` event，应同时保留二者；若只更新 builder state，也必须保存正确的 show time
-  用于审计。
-- 有开盘集合竞价时，open 是首个 actual I024 packet 的第一项；没有集合竞价而以逐笔
-  撮合开盘时，open 是该盘逐笔撮合形成的最后撮合价位，位于首个 actual packet 的某一项；
-  无集合竞价且无成交时，期货 official open 等于 reference price。
-- 因此当前“第一项 actual trade 永远是 open”的实现不成立。正式迁移必须建立开盘模式/
-  session state fixture，并用 I070/I071/I072 official open 做收盘校验；不能仅靠
-  `open == 0` 判断未初始化，因为零价 spread 合法。
-- intraday Orderbook 中 `total_volume=0` 时 actual OHLC/last 的零值表示尚无 actual trade；
-  official no-trade open 属于 session statistics，不应通过未来收盘消息回填到盘前 row。
-
-## packet-level `TradeStats`
-
-I024 packet 尾部的三个 summary 是 exchange direct fact，但累计买/卖成交笔数不是
-Orderbook level volume，也不是逐 item aggressor side。建议每个 I024 packet 另写一行：
-
-```text
-trading_day,market,symbol,exchange_ns,information_ns,local_ns,is_trial,
-exchange_total_volume,total_buy_match_count,total_sell_match_count,
-is_first_packet,source_sequence
-```
-
-- `exchange_total_volume` 对 actual packet 更新 actual cumulative state；trial packet 只按
-  wire summary 保留，不覆盖 actual state。
-- count 是累计成交笔数，不能分摊到 packet 内 individual Trade，也不能推导其 aggressor。
-- I084 S 可作为 recovery/validation source，使用配套 I084 O 的
-  `LAST-PROD-MSG-SEQ` 表示 as-of；它不能生成遗漏的 Trade rows。
-
-如果实现阶段不需要单独查询这些 counts，可以先不发布 `TradeStats`，但必须从主
-Orderbook 删除误导字段，并在 packet validation/log 中保留 summary。不能把 counts 改名为
-bid/ask volume。
-
-## `DerivedOrderbook<1>` 与 `OrderbookDelta`
-
-### DerivedOrderbook
-
-TAIFEX derived bid/ask 是交易所直接提供的一档，不是普通五档的第六档，也不是可从
-outright book 无条件重算的研究因子。建议 actual-only record：
-
-```text
-trading_day,market,symbol,exchange_ns,local_ns,
-derived_ask_price,derived_ask_volume,derived_bid_price,derived_bid_volume,
-source_message,source_sequence
-```
-
-- I081 action 5 直接 overlay；price/volume 都为 0 表示清除。
-- actual I083 先清空再完整替换；即使没有 derived entry，也发布 empty state 以表达清除。
-- trial I083 按协议没有 derived order，不发布也不清空 actual derived state。
-- 一条 source 同时修改 ordinary 与 derived 时，两张表可以共享
-  `(symbol, exchange_ns, source_sequence)`。
-
-前 2,000,000 frame 样本里，I081 ordinary action 为 514,851 项，derived overlay 为
-672,494 项。derived 不是可忽略的极少数边界；独立输出也能避免 derived-only 更新产生大量
-重复 ordinary rows。
-
-### OrderbookDelta
-
-主 Orderbook 保存 applied state，不应保留当前压缩后的 `orderbook_action=0/1`。若研究或
-debug 需要 exact I081 delta，另写：
-
-```text
-trading_day,market,symbol,exchange_ns,local_ns,
-book_type,side,action,level,price,volume,
-source_sequence,source_index
-```
-
-- `book_type=ordinary/derived`；`side=bid/ask`；`action=new/change/delete/overlay`。
-- `source_index` 保留同一 I081 内 entry 顺序；不能先按 side/action regroup 再应用。
-- I083 是 snapshot，不伪造为一组 delta；需要 replay 时直接消费 snapshot + 后续 delta。
-
-## 其他协议字段的分表边界
-
-| 来源 | 文档字段 / 语义 | 建议归属 |
-|---|---|---|
-| I025 | day high/low 与 `SHOW-TIME` | builder validation/recovery；需要事件流时进入 `HighLow` |
-| I030 | per-product 买卖累计委托笔数与 contract 数 | `OrderStats`，不是五档 total volume |
-| I070 | session OHLC/close、委托/成交统计 | session/daily statistics |
-| I071 | I070 + settlement price | session/daily statistics |
-| I072 | I071 + open interest + block trade quantity | session/daily statistics；open interest 不进 Orderbook |
-| I073 | calendar-spread close statistics | spread session/daily statistics |
-| I084 O | full book + last product sequence | recovery state，不直接发布实时 market row |
-| I084 S | first/last match、total volume、match counts、high/low、I030 totals | recovery/validation；按所属事实分表 |
-| I084 P | product lifecycle 与 price-band status | `InstrumentStatus` |
-| I010/I011 | reference、decimal locator、multiplier、currency、contract metadata | basic-info |
-| I012 | 多阶涨跌停价 | price-limit dataset / validation，不重复进每行 book |
-| I140 | system/product status | `InstrumentStatus` |
-
-I030 的最小 `OrderStats` 可包含：
-
-```text
-trading_day,market,symbol,exchange_ns,local_ns,
-buy_order_count,buy_order_volume,sell_order_count,sell_order_volume,
-channel_id,channel_sequence
-```
-
-I030 没有 `PROD-MSG-SEQ`，因此这里保留 common header 的 channel identity；
-`exchange_ns` 使用 header `INFORMATION-TIME`。`volume` 单位同样是 contract。
-I072 的 `OPEN-INTEREST` 是交易日/session 统计值，
-不是逐 I024 变化的盘中持仓序列；除非未来接入独立逐笔来源，不应把同一个收盘数复制到
-全天 Orderbook 或 Trade。
-
-## 可推导字段与禁止伪造字段
-
-### 研究层按需计算，不写 source 主表
-
-- mid、spread、microprice、level imbalance、book slope。
-- 普通 N 档 bid/ask volume sum 与 volume-weighted book price。
-- 连续无 gap 区间的 `delta_total_volume` / `delta_total_value`。
-- 从 `Trade` 聚合的 bar、VWAP、trade count 和 price impact。
-- 从 `OrderbookDelta` 统计的更新频率与 action count。
-- gap-free 条件下由 first/continuation 推导的 incoming-order match group。
+| I010 | futures basic-info：reference、decimal locator、multiplier、currency、dates、flow group 等 | 不进入高频行；现有 basic-info 继续扩展 |
+| I011 | spread basic-info | 同上 |
+| I012 | 多阶涨跌停价 | 独立 price-limit/basic generation；不在每条 book 重复 |
+| I120 | stock futures/options 与 stock id/underlying mapping | basic/reference dataset |
+| I130 | contract adjustment | reference event/dataset，不作为 market tick |
+| I050 | 公告文字 | 需要时独立 announcement dataset；不为数字研究主线解析 Big5 text |
+| common header version/body length | decoder/manifest | 不在每行重复 |
+| checksum/trailer | input validation/quality log | 错误按 date/channel/offset 记录，继续处理可定位的下一 frame |
+| I001/I002 等控制消息 | session/sequence quality log | 不伪造 product market row |
+| I084 A/O/S/P/Z | recovery state/audit | 不发布伪实时 Trade/Orderbook/status row |
+
+`taifex.md` 继续作为当前 basic-info 与现有 converter 行为的事实源；下一版实现时应另开
+basic-info schema review，不在本文复制 I010/I011/I012/I120/I130 全部静态字段。
+
+## 可推导与禁止伪造
+
+### 研究层按需推导
+
+- mid、spread、microprice、level imbalance、book slope；
+- N 档 bid/ask volume sum、VWAP book price；
+- actual Trade 的 OHLC、bar、VWAP、trade count、price impact；
+- gap-free `TradePacket` 的 cumulative volume/value delta；
+- `OrderbookDelta` action frequency，以及五档内可观察的挂单/撤单变化；
+- 基于 `match_group_sequence` 的一张 incoming order 撮合组统计；
+- 使用明确算法、as-of quote 与 unknown 状态的 aggressor inference。
 
 ### 不得写成 exchange fact
 
-- aggressor side：I024 不提供逐 item 主动买卖方向；累计 buy/sell match count 也不能分配
-  到单笔成交。
-- order id、incoming-order id、queue position、per-level order count。
-- 遗漏 gap 内的逐笔价格、成交路径与精确 cumulative value。
-- `information_ns - exchange_ns` 形式的 network latency。
-- `volume / multiplier` 形式的 unit count；期货 volume 已是 contract，multiplier 是每口
-  contract size。
-- 从普通与 derived book 反推的 synthetic leg executions。
+- aggressor side、incoming/resting order id、queue position、per-level order count；
+- 五档之外的委托/撤单路径，或把 level Change/Delete 等同于单一订单行为；
+- gap 内遗漏的逐项成交价格和精确成交路径；
+- `information_ns - exchange_ns` 形式的 network latency；
+- `volume / multiplier` 形式的 unit count：期货 volume 已是 contract，multiplier 是每口大小；
+- 从 ordinary/derived book 反推的 synthetic leg executions。
 
-## 当前 Aries 实现必须修正的行为
+## 2026-08-03 真实数据证据
 
-后续 schema 实施除了改字段，还必须修正以下状态语义：
+输入：`/tw_backup/data/tw/raw/future/taifex_20260803.dump`
 
-1. `ProcessTrade()` 当前直接跳过 I024 `MATCH-TIME` bytes，event 使用 header time；
-   first/continuation bit 完全未保存，Trade item 也未输出。
-2. I025 已解码 `SHOW-TIME` 但立即丢弃；high/low state 使用 header time。
-3. trial I024 当前会覆盖 `last_price` 并增加 pending `trade_volume`；trial 只应输出
-   `Trade(is_trial=1)`。
-4. I081 不重置 `match_flag`，因此 row 可能继承上一条 I024/I083 的 trial flag；
-   `is_trial` 必须来自触发当前 book 的 source。
-5. I083 无条件 `ClearBook()`，trial snapshot 会覆盖 actual ordinary/derived state；必须使用
-   独立 actual/trial book。
-6. 当前 opening 永远取首个 actual Trade item；这不覆盖“无集合竞价、逐笔撮合开盘”的
-   protocol 规则。
-7. I084 S 的 `first_price` 可以覆盖已有较新 open；recovery merge 必须逐字段遵守 as-of
-   sequence，不能回滚更晚 actual state。
-8. `orderbook_action` 只在 New/Delete 设为 1，Change 与 derived Overlay 都变成 0；主表应
-   删除，delta 表保存 exact action/type/index。
-9. derived-only I081 当前仍写一条重复 ordinary row；拆表后分别按实际变更发布。
-10. `total_value` 在 gap recovery 后无法恢复遗漏路径；当前虽记录 gap，却没有 generation
-    manifest/schema-level invalidation，正式迁移必须补齐。
-11. `localtime=exchtime` 是 offline compatibility fallback；新 manifest 必须说明具体来源。
-12. 当前 `reference_price` 与 `symbol_id=-1` 每行重复；正式 schema 分别改为 basic-info join
-    与删除。
+```text
+size = 5,423,972,003 bytes
+sha256 = b345f94c70288c3857388b64efbdf0f75bd66f31966cdce13ebb2a951a73d3c1
+frames = 53,482,242
+day frames before 13:46:00 = 52,519,771
+```
 
-## 与 Orion 的有意差异
+独立全文件 scanner 得到：
 
-Orion 的实际 TAIFEX `to_csv` 使用 Nova frontend options 的 `quill::CsvWriter` 和
-40 列 `FactorCsvWriter`；它不是 `orderbook_format.h` 的完整 struct formatter。Orion 会把
-I024 状态折叠到后续 I081/I083 row，不输出 Trade。Aries 后续设计有意区别如下：
+- I024：563,520 packet，591,366 item；477,489 actual、86,031 trial；20,728 个
+  multi-item packet，单包最大 37 项；当日所有 packet 都是 first，未出现 continuation。
+- 112,461 个 I024 packet 的 `MATCH-TIME != INFORMATION-TIME`。
+- 477,489 个 actual packet 的累计买/卖成交 count 都同时增长；不存在 buy-only 或
+  sell-only packet，不能据此推断方向。
+- I081：45,612,932 message、51,183,942 entry；ordinary 26,415,345、derived
+  24,768,597；mixed message 327,047。ordinary action 分布为 New 7,448,010、Change
+  14,138,512、Delete 4,828,823；derived overlay 24,768,597。
+- I081 中有 21,958 个 negative-price entry 与 384,777 个 zero-price entry，验证 signed/zero
+  spread 不能当缺失。
+- I083：86,617 message，其中 actual 586、trial 86,031、empty 23；trial best-bid market
+  sentinel 479 次。该日 I083 没有 derived level，但 I081 derived overlay 很多，不能据此删字段。
+- I025 9,870 条，其中 864 条 `SHOW-TIME != INFORMATION-TIME`；I030 1,360,652 条；
+  I060 348,124、I064 12,990、I100 210、I140 日盘 199 条。
+- I084 日盘 4,095,964 message，包含大量 O/S/P recovery snapshot；它说明 recovery 是常态
+  数据链路的一部分，但不是同等数量的实时 market event。
+- 当前 Aries conversion 发布 44,860,237 条 44-column Orderbook、4,892 条 basic-info；
+  记录 3,721 个 gap event、448 个 symbol、7,660 个 missing sequence，均由 snapshot 标记恢复。
 
-- 保持单进程同步 converter，不依赖 SHM、runtime symbol pool 或 async reader。
-- I024 使用 `MATCH-TIME`，并额外保存 `INFORMATION-TIME`；Orion builder 只使用 header
-  `exchtime`，已转换的 `match_time` 没有进入 CSV。
-- 每项 Trade 只累计自身 volume；Orion multi-item 聚合路径会把累计 packet volume 再次
-  加进 total volume。
-- value 使用 `abs(price) * volume * multiplier`；Orion 不乘 multiplier，且负价 spread
-  会产生负 value。
-- actual/trial Trade 与 book state 分开；Orion 与当前 Aries 都可能让 trial price 覆盖
-  actual `last_price`。
-- I025 采用 `SHOW-TIME` 并作为官方 high/low source；Orion 先覆盖 header time 后再比较
-  show time，更新条件并不可靠。
-- ordinary、derived、delta 和 packet statistics 分表；Orion to-csv 不输出 derived，
-  当前 Aries 则把 derived 重复在 ordinary 宽表。
-- 删除 runtime `symbol_id`、packed status、误命名 bid/ask totals、open interest 和
-  per-row recovery flag。
-- I083 actual/trial 都按独立 state 做完整 replace；I084 recovery 不伪装成实时 event。
+Orion SHM `to_csv` 对同日 DIFH6 输出 29,443 行。与 Aries 对照中 book/time/OHLC 可对齐，
+但 Orion 对 I024 multi-item 会累计过量 volume，`trade_volume/action` 会粘在后续 book row，
+且没有把 I084 statistics 正确合并为完整逐笔事实。这些是新设计分表和独立 Trade 的实证原因，
+不是要求兼容 Orion CSV。
 
-## 真实数据证据
+以上数字只绑定该文件、该 hash 与日盘 cutoff，不外推到夜盘或其他交易日。正式实现后必须
+重新记录新 schema 的 row count、column count、hash、时间范围、gap/recovery/imputation
+summary 与 storage cost。
 
-2026-07-07 完整日盘 dry-run（`13:46:00` cutoff 前）读取 61,605,862 条 message，当前
-converter 模拟输出 54,086,067 条 orderbook row 与 4,839 条 basic-info row。当前日志还
-记录 4 个 product sequence gap，均通过 snapshot recovery；这些 recovery 仍无法重建
-遗漏的 exact Trade/value path。
+## 当前 Aries 与 Orion 需要修正/有意不同之处
 
-同日之前已完成的前 2,000,000 frame 只读样本：
+1. Aries `ProcessTrade()` 当前跳过 I024 `MATCH-TIME`，也不输出 item/continuation；新 Trade
+   必须保存 `MATCH-TIME` 与 header time。
+2. Aries I025 已解码 `SHOW-TIME` 但丢弃；新 HighLow 使用 SHOW-TIME。
+3. Aries trial I024 会污染 last/pending volume；actual/trial state 必须分离。
+4. Aries I081 row 可能继承旧 `match_flag`；新 `is_trial` 只来自当前 source。
+5. Aries I083 无条件清空同一 book；必须分 actual/trial state。
+6. Aries 开盘价恒取首个 actual item，不覆盖官方连续撮合开盘规则。
+7. Aries I084 recovery merge 未逐字段遵守 snapshot as-of sequence；不能回滚较新 state。
+8. Aries `orderbook_action` 丢 Change/Delete/Overlay；主表删除，delta 表保留 exact entry。
+9. Aries derived-only I081 仍发布重复 ordinary row；分表后只发布实际变化的 record。
+10. Aries `localtime=exchtime` 只是 offline fallback；新 manifest 必须显式记录。
+11. Orion/Aries 都把 I024 state 折叠到下一条 book；新 schema 保留独立 event 和共同 sequence。
+12. Orion `total_ask_volume/total_bid_volume` 实际装的是 I024 买卖成交 count，名称和语义错误；
+    新 schema 只在 TradePacket 使用 official count 名称。
+13. Orion `FutureOrderbook` 的 `open_interest` 来自盘后 I072，不进入逐笔 Orderbook。
+14. 新 Aries 继续使用单进程同步 converter、Nova frontend options 与 Quill CSV writer，不依赖
+    SHM，也不保留 legacy formatter。
 
-- 127,339 个 I024 packet 展开为 132,095 个 price/quantity item；3,066 个 packet 含多个
-  item，样本单 packet 最大 21 项。
-- 91,114 个 I024 packet 的 `MATCH-TIME` 与 header `INFORMATION-TIME` 不同。
-- 1,853 个 I025 中，290 个 `SHOW-TIME` 与 header time 不同。
-- I081 ordinary action 514,851 项，derived Overlay 672,494 项。
-- I083 出现 39 个 empty book；empty snapshot 是正常协议状态，不是数据错误。
-- 完整日盘有 1,757,829 条 I030，说明 per-product OrderStats 实际存在且量大。
+## 后续实现顺序
 
-这些结果只用于支持字段设计，不是新 schema 的 output baseline。正式实施后必须重新生成
-并记录新文件的 row count、column count、hash、时间范围、gap summary 与 storage cost。
+用户确认字段后，按独立 L3 schema migration 实施：
 
-## 后续实施顺序
-
-该设计经用户 review 后，应作为独立 L3 schema migration：
-
-1. 锁定 TAIFEX 专属 enums、`Orderbook<5>`、`Trade`、market sentinel 与时间 fixtures。
-2. 先建立 I024 multi-item/continuation、trial、negative/zero spread、item cumulative
-   volume、MATCH/INFORMATION time 的失败测试。
-3. 建立 I083 actual/trial/empty/market snapshot 和 I081 mixed ordinary/derived/action
-   ordering fixture。
-4. 分离 builder internal actual book、trial book、actual trade state 与 derived state。
-5. 增加 Trade writer；再按需要增加 `TradeStats`、`DerivedOrderbook` 与
-   `OrderbookDelta` writer。
-6. 修正 I025 `SHOW-TIME`、open mode、I084 per-field as-of merge 与 gap/value invalidation。
-7. 创建新 schema/version、文件命名与 generation manifest；不兼容双写、不覆盖旧文件。
-8. 跑 focused CTest、完整 CTest、一天真实 full conversion 和独立全文件 scanner。
-9. 测量 orderbook 去重、Trade/derived 分表后的 bytes、吞吐与压缩比，再确定全历史重建。
+1. 锁定 TAIFEX enums、POD `Orderbook<5>`、`Trade`、`TradePacket` 和 CSV header/precision。
+2. 先建立 I024 multi-item/continuation、MATCH/INFORMATION time、trial、negative/zero spread、
+   group 与 missing-volume 的失败测试。
+3. 建立 I081 mixed action ordering、I083 actual/trial/empty/market sentinel 与 derived fixture。
+4. 分离 actual/trial ordinary state、derived state、trade/group state 与 recovery state。
+5. 实现 P0 writers，再按优先级增加 DerivedOrderbook、HighLow、OrderStats 与 status writer。
+6. 创建新 schema/version、文件名和 generation manifest；不做 compatibility 双写，不覆盖旧文件。
+7. 跑 focused CTest、完整 CTest、一天真实 full conversion 与独立全文件 scanner 对账。
+8. 测量 row count、bytes、吞吐与压缩比后，再决定是否发布可选 Delta/underlying/session 表并
+   重建全历史。
 
 ## 验收边界
 
-- 每个 I024 price/quantity item 恰好一条 Trade，source-level key 唯一且 wire 顺序不变。
-- Trade `exchange_ns=MATCH-TIME`，`information_ns=INFORMATION-TIME`；I025 使用
-  `SHOW-TIME`。
-- actual/trial ordinary book 独立；trial Trade/book 不改变 actual OHLC/volume/value。
-- zero-price spread、empty level 与 trial market order 可无歧义区分。
-- ordinary 与 derived updates 都不丢失；derived-only source 不制造 ordinary duplicate。
-- I081 entries 严格按 `source_index` 应用；主 state 与 delta replay 结果一致。
-- actual Trade row 的最终 item `total_volume` 等于 packet `MATCH-TOTAL-QTY`。
-- I030、I024 counts、I072 open interest 均位于正确数据集，不再冒充盘口字段。
-- gap/recovery/metadata/local-time fallback 由 date/symbol/sequence manifest 或日志审计；
-  不可恢复的 Trade/value 不被静默伪造。
+- 每个 I024 price/quantity item 恰好一条 Trade，source key 唯一且 wire 顺序不变。
+- first/continuation group 可识别；不生成 exchange 未提供的 order id 或 aggressor side。
+- Trade `exchange_ns=MATCH-TIME`、`information_ns=INFORMATION-TIME`；HighLow 使用 SHOW-TIME。
+- actual/trial ordinary book 独立，trial Trade/book 不改变 actual trade state。
+- zero-price spread、empty level 与 trial market order 无歧义。
+- I081 entry 严格按 source index 应用；ordinary/derived 更新都不丢失。
+- TradePacket 最终 `exchange_total_volume` 与 source summary 相等，value 使用正确 multiplier，
+  missing-volume 补值可由 summary/log 审计。
+- I030、I024 counts、I072 open interest、I140 status 都位于正确 dataset，不再冒充 book field。
+- gap/recovery/metadata/local-time fallback 由 date/symbol/sequence quality summary 审计；恢复
+  snapshot 不被伪装成实时 event。
 
 ## 当前未实现边界
 
-- 当前 `Orderbook<5>`、44/27 列 CSV、文件名和 `/tw_backup` 历史结果均未因本文改变。
-- 当前没有 Trade、TradeStats、DerivedOrderbook、OrderbookDelta、OrderStats 或 HighLow CSV。
-- 当前没有 schema version / generation manifest；quality 仍主要依赖逐日 converter log。
-- 2026-07-07 真实样本证据只覆盖 futures 日盘；night session 与 options 需要独立设计和回归。
-- opening mode、trial packet summary 和 orphan continuation 的完整真实 fixture 仍需在实施阶段
-  从更多交易日取样验证，不能仅凭本文推断直接宣称已正确实现。
+- 本文没有改变当前 `Orderbook<5>`、44/27 列 CSV、文件名或 `/tw_backup` 历史结果。
+- 当前没有 Trade、TradePacket、DerivedOrderbook、OrderbookDelta、HighLow、OrderStats、
+  QuoteRequest、underlying、status 或 session-statistics CSV。
+- 当前没有 schema version/generation manifest；质量仍主要依赖逐日 converter log。
+- 真实证据只覆盖 2026-08-03 futures 日盘；night session 与 options 需要独立设计和回归。
+- continuation、无集合竞价开盘和不同 scope 状态的真实 fixture 仍需从更多日期抽取；官方协议
+  已锁定实现责任，但不能用单日“未出现”宣称覆盖。
