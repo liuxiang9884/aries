@@ -3,7 +3,7 @@
 更新时间：2026-08-02
 
 状态：**设计建议，尚未实现**。当前转换行为仍以
-`data/converter/docs/taifex.md` 记录的 44 列 orderbook CSV 与 27 列 basic-info
+`data/docs/converter/taifex.md` 记录的 44 列 orderbook CSV 与 27 列 basic-info
 CSV 为准。本文是后续 TAIFEX futures 专属 `Orderbook<N>` 与 `Trade` schema review
 的事实源，不描述当前已发布的数据版本。
 

@@ -64,7 +64,7 @@ market_data_line
 - 两个输出文件的最终 rename 不是文件系统级事务；实现需用 staging/backup/rollback 协议，发布任一步失败时恢复旧文件并清理临时文件。
 - 初始实现因异步错误传播边界保留同步 writer；2026-08-02 按用户确认迁移到 Nova
   frontend 的 Quill writer，并保留 partial/rollback，异步错误传播限制由当前
-  `data/converter/docs/twse.md` 明确记录。
+  `data/docs/converter/twse.md` 明确记录。
 
 ## 实施步骤
 

@@ -2,13 +2,13 @@
 
 日期：2026-08-05
 
-状态：执行中
+状态：完成
 
 ## 目标
 
 统一 `aries` 的文档分层：项目级文档保留在根 `docs/`；每个顶层业务模块只维护
 一个 `docs/` 目录；子模块文档放在该顶层模块 `docs/` 下的同名目录。首个迁移对象为
-`data/converter/docs/`，目标路径是 `data/docs/converter/`。
+`data/converter/` 下原有的文档目录，目标路径是 `data/docs/converter/`。
 
 ## 非目标
 
@@ -36,8 +36,8 @@
 
 ## 实施步骤
 
-1. 将 `data/converter/docs/` 整体移动到 `data/docs/converter/`。
-2. 全仓库替换旧的 `data/converter/docs/...` 引用。
+1. 将 converter 原文档目录整体移动到 `data/docs/converter/`。
+2. 全仓库把原 converter 文档引用替换为新路径。
 3. 更新 `AGENTS.md`，明确顶层模块唯一 `docs/` 与子模块目录规则。
 4. 更新全局、data、converter onboarding 的入口与当前路径事实。
 5. 检查所有仓库内 markdown 路径、重复专题和遗留 `docs/` 目录。
@@ -45,8 +45,9 @@
 ## 验证策略
 
 - `git diff --check`
-- 确认 `data/converter/docs/` 不存在且 `data/docs/converter/onboarding.md` 存在。
-- 使用 `rg` 确认没有 `data/converter/docs` 或其他旧 converter 文档路径。
+- 确认 converter 代码目录不再包含 `docs/`，且
+  `data/docs/converter/onboarding.md` 存在。
+- 使用 `rg` 确认没有遗留的旧 converter 文档路径。
 - 从全部 Markdown 中提取反引号包裹的仓库相对路径，对可判定路径执行存在性检查。
 - 运行 `git status --short --branch` 并检查 rename diff，确认没有代码文件变化。
 
@@ -59,3 +60,14 @@
 
 - 历史计划中的旧路径也必须改成新路径，否则新对话可能沿用过期入口。
 - 文档中的命令、外部绝对路径和概念性占位符不能机械地按文件路径验证，需要区分检查。
+
+## 验证结果
+
+- 原 converter 文档目录与 `data/docs/converter/` 均为 16 个跟踪文件；除 onboarding
+  日期和目录规则外，逐文件比较确认内容只发生路径替换。
+- 仓库内仅保留根 `docs/` 以及 `data`、`factors`、`backtest`、`models`、`research`
+  五个顶层业务模块的 `docs/`。
+- 全仓库未发现遗留的旧 converter 文档路径；37 个可静态识别的仓库内文档路径均存在，
+  概念性占位符已人工排除。
+- `git diff --check` 通过；本次没有修改代码、构建配置或数据处理行为，因此不运行 CMake、
+  CTest 或 dump 转换。

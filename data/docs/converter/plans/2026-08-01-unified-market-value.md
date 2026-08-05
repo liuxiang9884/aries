@@ -34,7 +34,7 @@
 
 以下是 2026-08-01 全量重建暴露问题后的处理 contract。该 contract 已在 TWSE
 converter 与 `data/converter/scripts/rebuild_twse_csv` 中实现；长期行为说明以
-`data/converter/docs/twse.md` 为事实源。
+`data/docs/converter/twse.md` 为事实源。
 
 已锁定：
 

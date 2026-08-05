@@ -38,7 +38,7 @@ git 的 `CMakeUserPresets.json`。
 维护：
 
 - data 下载与文件检查：`data/docs/testing.md`
-- data converter：`data/converter/docs/testing.md`
+- data converter：`data/docs/converter/testing.md`
 
 ## 后续测试要求
 

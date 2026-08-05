@@ -22,7 +22,7 @@
 
 - `data/docs/exchange/TWSE集中市場即時交易資訊傳輸規格書(B.12.11)(202503)_20250113092444.pdf`
 - `data/docs/exchange/上櫃股票IP行情網路規格書(V.12.16 TCPIP).pdf`
-- `data/converter/docs/twse.md`
+- `data/docs/converter/twse.md`
 
 ## C++ schema
 

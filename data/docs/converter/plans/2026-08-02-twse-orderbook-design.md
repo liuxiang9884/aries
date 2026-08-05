@@ -25,7 +25,7 @@
 
 - `data/converter/twse/orderbook.h`
 - `data/converter/twse/message_decoder.cpp`
-- `data/converter/docs/twse.md`
+- `data/docs/converter/twse.md`
 - TWSE / TPEx 两份交易所行情传输 PDF
 - `/home/liuxiang/dev/orion` 的 `StockDepth<5>`、TWSE converter、data engine 和
   `FactorCsvWriter`
@@ -56,7 +56,7 @@
   `unknown`，并记录方向实际可用的 source sequence。
 - money flow 必须区分 actual executed notional 与非成交 book pressure；未知方向、第五档
   边界、市价单、currency 和可用时点均有显式规则。
-- `data/converter/docs/onboarding.md` 与 `data/converter/docs/twse.md` 能定位到唯一专题事实源。
+- `data/docs/converter/onboarding.md` 与 `data/docs/converter/twse.md` 能定位到唯一专题事实源。
 - `git diff --check` 通过，工作区不含代码或无关文件修改。
 
 ## 风险与回滚

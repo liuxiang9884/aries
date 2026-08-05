@@ -1,6 +1,6 @@
 # Aries 全局 Onboarding
 
-更新时间：2026-08-04
+更新时间：2026-08-05
 
 ## 项目职责
 
@@ -26,7 +26,7 @@
 | 模块 | Onboarding | 当前状态 |
 |---|---|---|
 | data | `data/docs/onboarding.md` | raw 数据与数据 contract |
-| data/converter | `data/converter/docs/onboarding.md` | 当前主线：转换结果与质量 contract |
+| data/converter | `data/docs/converter/onboarding.md` | 当前主线：转换结果与质量 contract |
 | factors | `factors/docs/onboarding.md` | 骨架 |
 | backtest | `backtest/docs/onboarding.md` | 当前主线：首次架构设计准备 |
 | models | `models/docs/onboarding.md` | 骨架 |
@@ -36,7 +36,8 @@
 
 - 数据、时间、因子、标签、成交和评估口径必须有明确事实源与可复现验证。
 - README 记录稳定的构建和使用入口；动态进度与下一步只写 onboarding。
-- 模块细节写入所属模块，根 `docs/` 只保留跨模块规则、项目级验证和计划。
+- 顶层模块只维护一个 `docs/`；子模块文档放在其下的同名目录。根 `docs/` 只保留
+  跨模块规则、项目级验证和计划。
 - 不把 NAS 凭据、机器专用配置、大数据文件、模型权重或缓存纳入 git。
 
 ## 验证命令
@@ -54,7 +55,7 @@ VCPKG_ROOT=/home/liuxiang/vcpkg ctest --preset debug
 ## 当前主线
 
 当前最具体模块是 `data/converter`。新对话在读取本文件后，直接读取
-`data/converter/docs/onboarding.md`，不默认读取其他模块 onboarding。当前主线是审查
+`data/docs/converter/onboarding.md`，不默认读取其他模块 onboarding。当前主线是审查
 TWSE v2 首批重建质量问题；`backtest` 已完成外部参考调研，首次架构设计仍待启动。
 
 ## 下一步
@@ -70,4 +71,4 @@ TAIFEX 缺口数据的下游使用规则。TAIFEX reader 在第一条 `13:46:00`
 
 - 稳定构建与工具用法：`README.md`
 - 项目级验证规范：`docs/testing.md`
-- 当前跨模块文档迁移记录：`docs/plans/2026-07-31-module-onboarding.md`
+- 当前模块文档目录规则：`docs/plans/2026-08-05-module-docs-layout.md`

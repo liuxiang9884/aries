@@ -93,7 +93,7 @@ tests/data/converter/twse/
 listed 使用 `service_type = 01`，TPEx / OTC 使用 `service_type = 02`；两种
 市场共用同一个 CLI。format 1 根据 service 选择不同 offset，其余已处理
 format 的 wire layout 相同。协议文档逐项核对和 Orion 差异见
-`data/converter/docs/twse.md`。
+`data/docs/converter/twse.md`。
 
 filter mode 为 `stock`、`etf`、`warrant`、`odd_lot`、`all`。为了保持 Orion
 兼容性，`stock` 沿用其四字符 symbol 判断，因此也会接受四字符 ETF；
@@ -124,7 +124,7 @@ bid_price4,bid_volume4,bid_price5,bid_volume5,source_sequence
 
 format1 另生成 30 列 basic-info CSV，主键和排序键为
 `(trading_day, market, symbol)`；字段、类型、权证单位缩放和空值 contract 见
-`data/converter/docs/twse.md`。它不包含 Big5/CP950 证券名称。
+`data/docs/converter/twse.md`。它不包含 Big5/CP950 证券名称。
 
 数据和时间语义：
 
@@ -323,7 +323,7 @@ symbol 排序且唯一、multiplier 全部大于 0。43,388 行包含负 signed 
 当前全量任务会把 44/27 列结果写入 `/tw_backup/data/tw/csv/future/`；每个交易日
 独立记录 success/failure 和 symbol 级问题，完成后再建立当前 contract 的 manifest
 与 hash 基线。TAIFEX schema、multiplier/value 口径、恢复语义、Orion 差异和夜盘边界见
-`data/converter/docs/taifex.md`。
+`data/docs/converter/taifex.md`。
 
 TWSE 历史重建采用 `data/converter/scripts/rebuild_twse_csv`，raw dump 保留在
 `/tw_backup/data/tw/raw/stock/`，CSV 成对写入 `/tw_backup/data/tw/csv/stock/`。

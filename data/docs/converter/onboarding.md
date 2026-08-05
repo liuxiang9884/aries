@@ -1,6 +1,6 @@
 # Data Converter 模块 Onboarding
 
-更新时间：2026-08-04
+更新时间：2026-08-05
 
 ## 模块职责
 
@@ -48,12 +48,12 @@
 - TWSE 批量 runner：`data/converter/scripts/rebuild_twse_csv`
 - 测试：`tests/data/converter/twse/`
 - TAIFEX 测试：`tests/data/converter/taifex/`
-- 协议与 Orion 差异：`data/converter/docs/twse.md`
-- TWSE / TPEx 股票 Orderbook 字段设计：`data/converter/docs/twse_orderbook.md`
-- TAIFEX schema、恢复语义与 Orion 差异：`data/converter/docs/taifex.md`
+- 协议与 Orion 差异：`data/docs/converter/twse.md`
+- TWSE / TPEx 股票 Orderbook 字段设计：`data/docs/converter/twse_orderbook.md`
+- TAIFEX schema、恢复语义与 Orion 差异：`data/docs/converter/taifex.md`
 - TAIFEX Futures Orderbook / Trade 字段设计：
-  `data/converter/docs/taifex_orderbook_trade.md`
-- 验证命令：`data/converter/docs/testing.md`
+  `data/docs/converter/taifex_orderbook_trade.md`
+- 验证命令：`data/docs/converter/testing.md`
 
 ## 重要边界 / Contract
 
@@ -61,11 +61,11 @@
   `Orderbook<N>`，`N` 决定 bid/ask 档位数组长度；当前 TWSE 与 TAIFEX 均显式使用
   `Orderbook<5>`，但股票与期货保持独立 struct，不建立公共数据基类或字段并集。
   交易所原始协议中的 `Depth` 名称保持不变。
-- 股票 v2 contract 以 `data/converter/docs/twse_orderbook.md` 为唯一事实源；期货下一版
-  Orderbook / Trade 设计仍在 `data/converter/docs/taifex_orderbook_trade.md`，尚未实现。
+- 股票 v2 contract 以 `data/docs/converter/twse_orderbook.md` 为唯一事实源；期货下一版
+  Orderbook / Trade 设计仍在 `data/docs/converter/taifex_orderbook_trade.md`，尚未实现。
 - 股票 23 列 CSV 只是 legacy generation；代码不提供兼容 writer/reader，也不双写。
 - basic-info CSV 的主键、列顺序、空值、单位和 format1 重复处理以
-  `data/converter/docs/twse.md` 为事实源；Big5/CP950 名称不解析、不输出。
+  `data/docs/converter/twse.md` 为事实源；Big5/CP950 名称不解析、不输出。
 - 交易日按 UTC+8 自然日零点解释；offline `local_ns = exchange_ns` 并写
   `local_time_source=exchange_fallback`。股票内部使用单次运行 dense `symbol_id`，不输出
   CSV；期货仍使用当前独立 contract。
@@ -83,7 +83,7 @@
   Nova/Quill 日志和最终文件校验判断磁盘层异常。
 - TWSE frame recovery 最多向前扫描 1 MiB，只接受完整通过 frame 校验的重同步点；
   可识别的受损 symbol 后续不再输出，避免错误延续累计 `total_value`。具体状态和日志
-  contract 以 `data/converter/docs/twse.md` 为准。
+  contract 以 `data/docs/converter/twse.md` 为准。
 - 所有有意偏离 Orion 的行为必须记录在对应 exchange 专题文档并有 focused test。
 - TAIFEX 的 `total_value = abs(price) * contracts * multiplier`，累计值非负。
 - TAIFEX metadata/gap/cache 问题不阻止其余合约发布，必须从每日日志审查 symbol、
@@ -116,10 +116,10 @@ cycle mismatch，确认对研究数据的使用边界；再决定是否继续重
 
 ## 按需阅读
 
-- TWSE / TPEx 协议与已知边界：`data/converter/docs/twse.md`
-- TAIFEX 协议、schema 与已知边界：`data/converter/docs/taifex.md`
+- TWSE / TPEx 协议与已知边界：`data/docs/converter/twse.md`
+- TAIFEX 协议、schema 与已知边界：`data/docs/converter/taifex.md`
 - TAIFEX 下一版 Orderbook / Trade 字段建议：
-  `data/converter/docs/taifex_orderbook_trade.md`
-- focused 与完整 dump 验证：`data/converter/docs/testing.md`
+  `data/docs/converter/taifex_orderbook_trade.md`
+- focused 与完整 dump 验证：`data/docs/converter/testing.md`
 - 数据路径与发布结果：`data/docs/data.md`
-- 已完成计划：`data/converter/docs/plans/`
+- 已完成计划：`data/docs/converter/plans/`

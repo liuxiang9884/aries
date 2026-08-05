@@ -17,7 +17,7 @@ dump 到 CSV 的独立工具，不提取 Orion 的 multicast、replay、SHM、sy
 pool 或 binary data file 路径。
 
 股票 normalized `Orderbook<N>`、typed state、原子 match group、方向、OHLC/value 与
-37 列 `twse-orderbook-v2` contract 见 `data/converter/docs/twse_orderbook.md`。本文负责
+37 列 `twse-orderbook-v2` contract 见 `data/docs/converter/twse_orderbook.md`。本文负责
 wire protocol、basic-info、filter、恢复、发布及相对 Orion 的边界，不复制逐字段 schema。
 
 ## 协议核对结果

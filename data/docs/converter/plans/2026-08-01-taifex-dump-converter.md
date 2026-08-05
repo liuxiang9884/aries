@@ -48,7 +48,7 @@ taifex_dump_converter
 
 实现和头文件都放在 `data/converter/taifex/`；测试放在
 `tests/data/converter/taifex/`。模块设计、schema、Orion 差异与真实数据验证写入
-`data/converter/docs/taifex.md`，当前接手状态写入模块 onboarding。
+`data/docs/converter/taifex.md`，当前接手状态写入模块 onboarding。
 
 ## Wire contract
 
@@ -200,4 +200,4 @@ block_trade_flag,expiry_type,underlying_type,close_group,end_session
 计划已于 2026-08-01 完成。同步 converter、focused tests、strict EOF/gap
 finalization、模块文档和 CLI 均已实现；20260707 完整 dump 已 dry-run 并生成正式
 depth/basic-info CSV。最终消息统计、输出 hash、独立全表检查和已知边界以
-`data/converter/docs/taifex.md` 为事实源。
+`data/docs/converter/taifex.md` 为事实源。

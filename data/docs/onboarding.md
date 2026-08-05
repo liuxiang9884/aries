@@ -1,6 +1,6 @@
 # Data 模块 Onboarding
 
-更新时间：2026-08-04
+更新时间：2026-08-05
 
 ## 模块职责
 
@@ -22,6 +22,7 @@
 
 - 下载脚本：`scripts/pull-tw-raw`、`scripts/synology-pull`
 - converter 子模块：`data/converter/`
+- converter 文档与 onboarding：`data/docs/converter/`
 - 数据现状与复现证据：`data/docs/data.md`
 - 交易所规格：`data/docs/exchange/`
 - 数据下载与文件检查：`data/docs/testing.md`
@@ -32,11 +33,13 @@
 - TWSE 以 `twse-orderbook-v2` exact header 为当前代码 contract；不提供 23 列
   legacy writer/reader 或双写。正式研究数据集仍需建立 manifest 与 schema version。
 - 数据和大体积转换结果不进入 git；仓库只跟踪代码、schema、manifest 和校验摘要。
+- data 只维护 `data/docs/`；converter 等子模块文档按名称放在其下，不在代码目录中
+  另建 `docs/`。
 
 ## 验证命令
 
 数据下载与文件检查见 `data/docs/testing.md`；项目级检查见
-`docs/testing.md`；converter 验证见 `data/converter/docs/testing.md`。
+`docs/testing.md`；converter 验证见 `data/docs/converter/testing.md`。
 
 ## 当前主线
 
@@ -52,4 +55,4 @@
 ## 按需阅读
 
 - 数据路径、转换结果和 hash：`data/docs/data.md`
-- converter 接手入口：`data/converter/docs/onboarding.md`
+- converter 接手入口：`data/docs/converter/onboarding.md`

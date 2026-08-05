@@ -8,7 +8,7 @@
 实施结果：代码、focused/full/sanitizer tests、37 列 Quill CSV、结构化质量日志和
 专题文档已完成；2026-07-07 `all --dry-run` 与独立基线一致，`stock`
 完整 CSV 已逐行验证。详细结果见
-`data/converter/docs/twse_orderbook.md` 与 `data/converter/docs/testing.md`。
+`data/docs/converter/twse_orderbook.md` 与 `data/docs/converter/testing.md`。
 实现提交为 `5087703`。
 
 ## 目标
@@ -249,10 +249,10 @@ total_value += observed_value
 
 文档：
 
-- `data/converter/docs/twse_orderbook.md`
-- `data/converter/docs/twse.md`
-- `data/converter/docs/testing.md`
-- `data/converter/docs/onboarding.md`
+- `data/docs/converter/twse_orderbook.md`
+- `data/docs/converter/twse.md`
+- `data/docs/converter/testing.md`
+- `data/docs/converter/onboarding.md`
 - 必要时同步根目录 `docs/onboarding.md` 的当前主线，不复制模块细节。
 
 ## 非目标
