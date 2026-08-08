@@ -18,7 +18,7 @@
 - v2 已合并到 `main`；2026-07-30/31 和 2026-08-03 已发布 37 列 CSV，
   2026-08-01/02 无输入。三个交易日均含需要后续审查的可恢复质量问题。
 - `data/tw_calendar.csv` 已建立 2025-2026 TWSE / TPEx 普通股票交易日 contract：无
-  header、单列 `YYYYMMDD`、严格升序，共 486 个交易日；来源、休市日和 raw 对照异常见
+  header、单列 `YYYYMMDD`、严格升序，共 485 个交易日；来源、休市日和 raw 对照异常见
   `data/docs/tw_calendar.md`。
 
 ## 关键入口
