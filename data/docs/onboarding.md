@@ -1,6 +1,6 @@
 # Data 模块 Onboarding
 
-更新时间：2026-08-05
+更新时间：2026-08-08
 
 ## 模块职责
 
@@ -17,6 +17,9 @@
   统一 manifest、跨市场 schema version 或夜盘交易日历 contract。
 - v2 已合并到 `main`；2026-07-30/31 和 2026-08-03 已发布 37 列 CSV，
   2026-08-01/02 无输入。三个交易日均含需要后续审查的可恢复质量问题。
+- `data/tw_calendar.csv` 已建立 2025-2026 TWSE / TPEx 普通股票交易日 contract：无
+  header、单列 `YYYYMMDD`、严格升序，共 486 个交易日；来源、休市日和 raw 对照异常见
+  `data/docs/tw_calendar.md`。
 
 ## 关键入口
 
@@ -24,6 +27,7 @@
 - converter 子模块：`data/converter/`
 - converter 文档与 onboarding：`data/docs/converter/`
 - 数据现状与复现证据：`data/docs/data.md`
+- 台湾证券市场交易日历：`data/tw_calendar.csv`、`data/docs/tw_calendar.md`
 - 交易所规格：`data/docs/exchange/`
 - 数据下载与文件检查：`data/docs/testing.md`
 
@@ -35,6 +39,8 @@
 - 数据和大体积转换结果不进入 git；仓库只跟踪代码、schema、manifest 和校验摘要。
 - data 只维护 `data/docs/`；converter 等子模块文档按名称放在其下，不在代码目录中
   另建 `docs/`。
+- `data/tw_calendar.csv` 表达 TWSE / TPEx 普通股票交易日，不表达 TAIFEX 夜盘交易日
+  归属，也不能作为 converter `--non-trading-days-file` 的休市日期列表直接传入。
 
 ## 验证命令
 
